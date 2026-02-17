@@ -68,11 +68,11 @@
   }
 
   function bindEvents() {
-    els.startBtn?.addEventListener('click', startTimer);
-    els.pauseBtn?.addEventListener('click', pauseTimer);
-    els.resumeBtn?.addEventListener('click', resumeTimer);
-    els.skipBtn?.addEventListener('click', () => endCurrentSession(false, 'skip'));
-    els.resetBtn?.addEventListener('click', resetCurrentSession);
+    els['start-btn']?.addEventListener('click', startTimer);
+    els['pause-btn']?.addEventListener('click', pauseTimer);
+    els['resume-btn']?.addEventListener('click', resumeTimer);
+    els['skip-btn']?.addEventListener('click', () => endCurrentSession(false, 'skip'));
+    els['reset-btn']?.addEventListener('click', resetCurrentSession);
 
     els['add-task-form'].addEventListener('submit', onAddTask);
     els['task-list'].addEventListener('click', onTaskListClick);
@@ -121,6 +121,7 @@
 
   function initializeTimer() {
     clearInterval(state.timer.tickId);
+    state.timer.tickId = null;
     const seconds = modeDurationSeconds(state.timer.mode);
     state.timer.totalSeconds = seconds;
     state.timer.remainingSeconds = seconds;
@@ -132,6 +133,9 @@
 
   function startTimer() {
     if (state.timer.running) return;
+    if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) {
+      initializeTimer();
+    }
     const now = Date.now();
     state.timer.running = true;
     state.timer.paused = false;
@@ -236,9 +240,9 @@
 
   function modeDurationSeconds(mode) {
     const s = state.data.settings;
-    if (mode === 'focus') return s.focusMinutes * 60;
-    if (mode === 'short_break') return s.shortBreakMinutes * 60;
-    return s.longBreakMinutes * 60;
+    if (mode === 'focus') return toValidInt(s.focusMinutes, 25, 1, 120) * 60;
+    if (mode === 'short_break') return toValidInt(s.shortBreakMinutes, 5, 1, 60) * 60;
+    return toValidInt(s.longBreakMinutes, 15, 1, 120) * 60;
   }
 
   function render() {
@@ -379,7 +383,7 @@
   }
 
   function updateSetting(key, value) {
-    state.data.settings[key] = value;
+    state.data.settings = sanitizeSettings({ ...state.data.settings, [key]: value });
     debouncedSave();
     if (key === 'theme') applyTheme();
     setMessage('Settings updated.');
@@ -491,7 +495,7 @@
     if (input.version === APP_VERSION) {
       return {
         version: APP_VERSION,
-        settings: { ...DEFAULT_DATA.settings, ...(input.settings || {}) },
+        settings: sanitizeSettings({ ...DEFAULT_DATA.settings, ...(input.settings || {}) }),
         tasks: Array.isArray(input.tasks) ? input.tasks : [],
         sessions: Array.isArray(input.sessions) ? input.sessions : [],
       };
@@ -519,10 +523,30 @@
 
     return {
       version: APP_VERSION,
-      settings: { ...base.settings, ...incoming.settings },
+      settings: sanitizeSettings({ ...base.settings, ...incoming.settings }),
       tasks: [...taskMap.values()],
       sessions: [...sessionMap.values()].sort((a, b) => new Date(a.startTime) - new Date(b.startTime)),
     };
+  }
+
+  function sanitizeSettings(raw) {
+    return {
+      focusMinutes: toValidInt(raw.focusMinutes, DEFAULT_DATA.settings.focusMinutes, 1, 120),
+      shortBreakMinutes: toValidInt(raw.shortBreakMinutes, DEFAULT_DATA.settings.shortBreakMinutes, 1, 60),
+      longBreakMinutes: toValidInt(raw.longBreakMinutes, DEFAULT_DATA.settings.longBreakMinutes, 1, 120),
+      longBreakInterval: toValidInt(raw.longBreakInterval, DEFAULT_DATA.settings.longBreakInterval, 2, 12),
+      autoStartNext: Boolean(raw.autoStartNext),
+      soundEnabled: raw.soundEnabled !== false,
+      endSessionConfirmation: raw.endSessionConfirmation !== false,
+      theme: ['system', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'system',
+      archiveCompletedTasks: Boolean(raw.archiveCompletedTasks),
+    };
+  }
+
+  function toValidInt(value, fallback, min, max) {
+    const n = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
   }
 
   function computeStats(sessions) {
