@@ -68,11 +68,11 @@
   }
 
   function bindEvents() {
-    els.startBtn?.addEventListener('click', startTimer);
-    els.pauseBtn?.addEventListener('click', pauseTimer);
-    els.resumeBtn?.addEventListener('click', resumeTimer);
-    els.skipBtn?.addEventListener('click', () => endCurrentSession(false, 'skip'));
-    els.resetBtn?.addEventListener('click', resetCurrentSession);
+    els['start-btn']?.addEventListener('click', startTimer);
+    els['pause-btn']?.addEventListener('click', pauseTimer);
+    els['resume-btn']?.addEventListener('click', resumeTimer);
+    els['skip-btn']?.addEventListener('click', () => endCurrentSession(false, 'skip'));
+    els['reset-btn']?.addEventListener('click', resetCurrentSession);
 
     els['add-task-form'].addEventListener('submit', onAddTask);
     els['task-list'].addEventListener('click', onTaskListClick);
