@@ -4,6 +4,7 @@
   const STORAGE_KEY = 'mypomodoro_data_v2';
   const LEGACY_STORAGE_KEY = 'mypomodoro_data_v1';
   const APP_VERSION = 2;
+  const NOTIFICATION_TAG = 'mypomodoro-session-complete';
 
   const DEFAULT_DATA = {
     version: APP_VERSION,
@@ -177,6 +178,8 @@
     if (state.timer.running) return;
     if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) initializeTimer();
 
+    requestNotificationPermissionIfNeeded();
+
     const now = Date.now();
     state.timer.running = true;
     state.timer.paused = false;
@@ -247,7 +250,10 @@
       debouncedSave();
     }
 
-    if (completed && state.data.settings.soundEnabled) playBeep();
+    if (completed) {
+      showSessionCompleteNotification(state.timer.mode);
+      if (state.data.settings.soundEnabled) playBeep();
+    }
 
     if (completed && state.timer.mode === 'focus') state.timer.phaseCount += 1;
     state.timer.mode = nextMode(state.timer.mode, state.timer.phaseCount, state.data.settings.longBreakInterval);
@@ -985,6 +991,30 @@
     gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
     osc.stop(ctx.currentTime + 0.26);
+  }
+
+  function requestNotificationPermissionIfNeeded() {
+    if (typeof window.Notification === 'undefined') return;
+    if (window.Notification.permission !== 'default') return;
+    window.Notification.requestPermission().catch(() => {});
+  }
+
+  function showSessionCompleteNotification(completedMode) {
+    if (typeof window.Notification === 'undefined') return;
+    if (window.Notification.permission !== 'granted') return;
+
+    const next = nextMode(completedMode, completedMode === 'focus' ? state.timer.phaseCount + 1 : state.timer.phaseCount, state.data.settings.longBreakInterval);
+    const body = `Finished ${humanMode(completedMode)}. Up next: ${humanMode(next)}.`;
+    const notification = new window.Notification('Pomodoro complete', {
+      body,
+      tag: NOTIFICATION_TAG,
+      renotify: true,
+    });
+
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
   }
 
   function setMessage(message, isError = false) {

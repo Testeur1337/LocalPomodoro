@@ -16,6 +16,7 @@ MyPomodoro is a Goodtime-like Pomodoro app that runs fully offline by opening `i
 - Pomodoro timer with Focus / Short Break / Long Break.
 - Defaults: 25 / 5 / 15 and long break every 4 focus sessions.
 - Controls: Start, Pause, Resume, Skip, Reset.
+- Browser notifications on session completion (when permission is granted).
 - Background-safe timing via absolute timestamps (`Date.now()` + `endAtMs`).
 - Tasks (global): add/rename/delete/archive/select with pomodoro counts.
 - Stats: today metrics, streak, 7-day chart, recent history, best day, all-time total.
