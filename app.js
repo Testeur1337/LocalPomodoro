@@ -1,18 +1,23 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'mypomodoro_data_v2';
-  const LEGACY_STORAGE_KEY = 'mypomodoro_data_v1';
+  const STORAGE_KEY = 'mypomodoro_data_v3';
+  const LEGACY_V2_KEY = 'mypomodoro_data_v2';
+  const LEGACY_V1_KEY = 'mypomodoro_data_v1';
   const WORKSPACE_META_KEY = 'mypomodoro_workspace_meta_v1';
   const WORKSPACE_HANDLE_DB = 'mypomodoro_workspace_db';
   const WORKSPACE_HANDLE_STORE = 'handles';
   const WORKSPACE_HANDLE_ID = 'last-workspace';
-  const APP_VERSION = 2;
-  const NOTIFICATION_TAG = 'mypomodoro-session-complete';
+  const APP_VERSION = 3;
 
   const DEFAULT_DATA = {
-    version: APP_VERSION,
+    version: 3,
+    meta: { workspaceName: 'My Life OS', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
     settings: {
+      theme: 'system',
+      weekStartsOn: 'monday',
+      dayStartHour: 6,
+      dayEndHour: 24,
       focusMinutes: 25,
       shortBreakMinutes: 5,
       longBreakMinutes: 15,
@@ -20,54 +25,37 @@
       autoStartNext: false,
       soundEnabled: true,
       endSessionConfirmation: true,
-      theme: 'system',
-      archiveCompletedTasks: false,
-      warnOnUnsavedExit: true,
-      dayStartHour: 6,
-      dayEndHour: 24,
       heatmapMetric: 'focus_minutes',
+      dailyFocusTargetMinutes: 120,
+      warnOnUnsavedChanges: true
     },
-    tasks: [],
+    hierarchy: { goals: [], projects: [], topics: [] },
+    daily: { days: {} },
     sessions: [],
-    planner: { days: {} },
+    reviews: { weeks: {} }
   };
 
   const state = {
     data: loadData(),
     ui: {
-      activeTab: 'timer',
-      historyFilter: 'all',
-      message: '',
-      plannerDate: dayKey(new Date()),
-      selectedHeatmapDay: null,
-      pendingSessionNote: null,
-      pendingFilePurpose: 'import',
+      activeTab: 'timer', plannerDate: dayKey(new Date()), selectedHeatmapDay: null, message: '',
+      activeContext: { goalId: '', projectId: '', topicId: '' }, pendingFilePurpose: 'import', pendingReflectionSessionId: null
     },
     timer: {
-      mode: 'focus',
-      phaseCount: 0,
-      running: false,
-      paused: false,
-      startedAtMs: null,
-      endAtMs: null,
-      remainingSeconds: 0,
-      totalSeconds: 0,
-      activeTaskId: null,
-      tickId: null,
+      mode: 'focus', phaseCount: 0, running: false, paused: false, startedAtMs: null, endAtMs: null,
+      remainingSeconds: 0, totalSeconds: 0, tickId: null, pendingBlockTitle: null
     },
     workspace: {
-      name: 'Local only',
-      dirty: false,
-      usingFileHandle: false,
-      lastSavedAt: null,
-      lastSavedFilename: null,
-      canOpenLastWorkspace: false,
-      handle: null,
-    },
+      name: 'Local only', dirty: false, usingFileHandle: false, lastSavedAt: null, lastSavedFilename: null, canOpenLastWorkspace: false, handle: null
+    }
   };
 
   const els = {};
-  const debouncedSave = debounce(() => { markDirty(); persistData(state.data); }, 1000);
+  const debouncedSave = debounce(() => {
+    state.data.meta.updatedAt = new Date().toISOString();
+    markDirty();
+    persistData(state.data);
+  }, 1000);
 
   init();
 
@@ -82,66 +70,69 @@
 
   function cacheElements() {
     [
-      'mode-label', 'timer-display', 'progress-fill', 'start-btn', 'pause-btn', 'resume-btn', 'skip-btn', 'reset-btn', 'active-task-select', 'auto-start-toggle',
-      'add-task-form', 'new-task-input', 'archive-toggle', 'task-list', 'today-focus-minutes', 'today-focus-count', 'streak-days', 'best-day', 'total-focus-hours',
-      'week-chart', 'history-filter', 'history-body', 'focus-minutes', 'short-break-minutes', 'long-break-minutes', 'long-break-interval', 'sound-toggle', 'confirm-toggle',
-      'export-btn', 'import-btn', 'copy-btn', 'paste-btn', 'reset-all-btn', 'import-file-input', 'status-message', 'theme-toggle', 'planner-date', 'planner-hours', 'planner-timeline', 'workspace-open-btn', 'workspace-open-last-btn', 'workspace-save-btn', 'workspace-save-as-btn', 'workspace-name', 'workspace-dirty', 'workspace-last-saved', 'warn-unsaved-toggle',
-      'block-form', 'block-id', 'block-start', 'block-end', 'block-title', 'block-cancel-btn', 'todo-form', 'todo-input', 'todo-list', 'heatmap-grid', 'heatmap-detail',
-      'day-start-hour', 'day-end-hour', 'heatmap-metric'
-    ].forEach((id) => (els[id] = document.getElementById(id)));
-
+      'mode-label','timer-display','progress-fill','start-btn','pause-btn','resume-btn','skip-btn','reset-btn','auto-start-toggle',
+      'active-goal-select','active-project-select','active-topic-select',
+      'planner-date','planner-hours','planner-timeline','block-form','block-id','block-start','block-end','block-title','block-cancel-btn',
+      'todo-form','todo-input','todo-list',
+      'goal-form','goal-input','goal-list','project-form','project-goal-select','project-input','project-list','topic-form','topic-project-select','topic-input','topic-list',
+      'today-focus-minutes','today-focus-count','streak-days','longest-streak-days','total-focus-hours','heatmap-grid','heatmap-detail','weekly-summary',
+      'weekly-review-form','weekly-reflection','weekly-intention',
+      'focus-minutes','short-break-minutes','long-break-minutes','long-break-interval','daily-focus-target-minutes','sound-toggle','confirm-toggle','warn-unsaved-toggle',
+      'day-start-hour','day-end-hour','heatmap-metric','theme-toggle',
+      'workspace-open-btn','workspace-open-last-btn','workspace-save-btn','workspace-save-as-btn','workspace-name','workspace-dirty','workspace-last-saved',
+      'export-btn','import-btn','copy-btn','paste-btn','reset-all-btn','import-file-input','status-message',
+      'reflection-dialog','reflection-form','reflection-rating','reflection-distractions','reflection-note'
+    ].forEach((id) => { els[id] = document.getElementById(id); });
     els.tabs = Array.from(document.querySelectorAll('.tab'));
-    els.panels = {
-      timer: document.getElementById('timer-panel'),
-      tasks: document.getElementById('tasks-panel'),
-      planner: document.getElementById('planner-panel'),
-      stats: document.getElementById('stats-panel'),
-      settings: document.getElementById('settings-panel'),
-    };
+    els.panels = { timer: $('#timer-panel'), planner: $('#planner-panel'), hierarchy: $('#hierarchy-panel'), stats: $('#stats-panel'), settings: $('#settings-panel') };
   }
 
   function bindEvents() {
-    els['start-btn']?.addEventListener('click', startTimer);
-    els['pause-btn']?.addEventListener('click', pauseTimer);
-    els['resume-btn']?.addEventListener('click', resumeTimer);
-    els['skip-btn']?.addEventListener('click', () => endCurrentSession(false, 'skip'));
-    els['reset-btn']?.addEventListener('click', resetCurrentSession);
+    els['start-btn'].addEventListener('click', startTimer);
+    els['pause-btn'].addEventListener('click', pauseTimer);
+    els['resume-btn'].addEventListener('click', resumeTimer);
+    els['skip-btn'].addEventListener('click', () => endCurrentSession(false, 'skip'));
+    els['reset-btn'].addEventListener('click', resetCurrentSession);
 
-    els['add-task-form'].addEventListener('submit', onAddTask);
-    els['task-list'].addEventListener('click', onTaskListClick);
-    els['active-task-select'].addEventListener('change', (e) => {
-      state.timer.activeTaskId = e.target.value || null;
-      render();
-    });
+    els['active-goal-select'].addEventListener('change', onTimerContextChange);
+    els['active-project-select'].addEventListener('change', onTimerContextChange);
+    els['active-topic-select'].addEventListener('change', onTimerContextChange);
 
-    els.tabs.forEach((tab) => tab.addEventListener('click', () => {
-      state.ui.activeTab = tab.dataset.tab;
-      render();
-    }));
+    els['planner-date'].addEventListener('change', (e) => { state.ui.plannerDate = e.target.value || dayKey(new Date()); renderPlanner(); });
+    els['block-form'].addEventListener('submit', onSaveBlock);
+    els['block-cancel-btn'].addEventListener('click', clearBlockForm);
+    els['planner-timeline'].addEventListener('click', onPlannerClick);
+    els['todo-form'].addEventListener('submit', onAddTodo);
+    els['todo-list'].addEventListener('click', onTodoClick);
+
+    els['goal-form'].addEventListener('submit', onAddGoal);
+    els['project-form'].addEventListener('submit', onAddProject);
+    els['topic-form'].addEventListener('submit', onAddTopic);
+    els['goal-list'].addEventListener('click', onGoalListClick);
+    els['project-list'].addEventListener('click', onProjectListClick);
+    els['topic-list'].addEventListener('click', onTopicListClick);
+
+    els['heatmap-grid'].addEventListener('click', onHeatmapClick);
+    els['weekly-review-form'].addEventListener('submit', onSaveWeeklyReview);
 
     els['auto-start-toggle'].addEventListener('change', (e) => updateSetting('autoStartNext', e.target.checked));
-    els['archive-toggle'].addEventListener('change', (e) => updateSetting('archiveCompletedTasks', e.target.checked));
     els['sound-toggle'].addEventListener('change', (e) => updateSetting('soundEnabled', e.target.checked));
     els['confirm-toggle'].addEventListener('change', (e) => updateSetting('endSessionConfirmation', e.target.checked));
-    els['warn-unsaved-toggle'].addEventListener('change', (e) => updateSetting('warnOnUnsavedExit', e.target.checked));
-    els['history-filter'].addEventListener('change', (e) => { state.ui.historyFilter = e.target.value; render(); });
+    els['warn-unsaved-toggle'].addEventListener('change', (e) => updateSetting('warnOnUnsavedChanges', e.target.checked));
     els['heatmap-metric'].addEventListener('change', (e) => updateSetting('heatmapMetric', e.target.value));
+    [['focus-minutes','focusMinutes'],['short-break-minutes','shortBreakMinutes'],['long-break-minutes','longBreakMinutes'],['long-break-interval','longBreakInterval'],['daily-focus-target-minutes','dailyFocusTargetMinutes']]
+      .forEach(([id, key]) => els[id].addEventListener('change', (e) => { updateSetting(key, Number(e.target.value)); initializeTimer(); render(); }));
+    els['day-start-hour'].addEventListener('change', updatePlannerHours);
+    els['day-end-hour'].addEventListener('change', updatePlannerHours);
 
-    [['focus-minutes', 'focusMinutes'], ['short-break-minutes', 'shortBreakMinutes'], ['long-break-minutes', 'longBreakMinutes'], ['long-break-interval', 'longBreakInterval']]
-      .forEach(([id, key]) => {
-        els[id].addEventListener('change', (e) => {
-          updateSetting(key, Number(e.target.value));
-          initializeTimer();
-          render();
-        });
-      });
+    els['workspace-open-btn'].addEventListener('click', openWorkspaceFlow);
+    els['workspace-open-last-btn'].addEventListener('click', openLastWorkspace);
+    els['workspace-save-btn'].addEventListener('click', () => saveWorkspace(false));
+    els['workspace-save-as-btn'].addEventListener('click', () => saveWorkspace(true));
 
-    els['day-start-hour'].addEventListener('change', () => updatePlannerHours());
-    els['day-end-hour'].addEventListener('change', () => updatePlannerHours());
-
-    els['export-btn'].addEventListener('click', exportData);
     els['import-btn'].addEventListener('click', () => { state.ui.pendingFilePurpose = 'import'; els['import-file-input'].click(); });
     els['import-file-input'].addEventListener('change', onImportFile);
+    els['export-btn'].addEventListener('click', exportData);
     els['copy-btn'].addEventListener('click', copyDataToClipboard);
     els['paste-btn'].addEventListener('click', pasteDataFromClipboard);
     els['reset-all-btn'].addEventListener('click', resetAllData);
@@ -151,20 +142,9 @@
     els['workspace-save-btn'].addEventListener('click', () => saveWorkspace(false));
     els['workspace-save-as-btn'].addEventListener('click', () => saveWorkspace(true));
 
-    els['planner-date'].addEventListener('change', (e) => {
-      state.ui.plannerDate = e.target.value || dayKey(new Date());
-      renderPlanner();
-    });
+    els['reflection-form'].addEventListener('submit', onSaveReflection);
 
-    els['block-form'].addEventListener('submit', onSaveBlock);
-    els['block-cancel-btn'].addEventListener('click', () => clearBlockForm());
-    els['planner-timeline'].addEventListener('click', onPlannerTimelineClick);
-
-    els['todo-form'].addEventListener('submit', onAddTodo);
-    els['todo-list'].addEventListener('click', onTodoListClick);
-
-    els['heatmap-grid'].addEventListener('click', onHeatmapClick);
-    els['heatmap-detail'].addEventListener('click', onHeatmapDetailClick);
+    els.tabs.forEach((tab) => tab.addEventListener('click', () => { state.ui.activeTab = tab.dataset.tab; render(); }));
 
     document.addEventListener('keydown', onKeyboard);
     document.addEventListener('visibilitychange', () => { if (state.timer.running) syncTimer(); });
@@ -172,14 +152,8 @@
   }
 
   function onKeyboard(e) {
-    const target = e.target;
-    if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-    if (e.code === 'Space') {
-      e.preventDefault();
-      if (!state.timer.running) startTimer();
-      else if (!state.timer.paused) pauseTimer();
-      else resumeTimer();
-    }
+    if (e.target && ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); if (!state.timer.running) startTimer(); else if (!state.timer.paused) pauseTimer(); else resumeTimer(); }
     if (e.key.toLowerCase() === 'r') resetCurrentSession();
     if (e.key.toLowerCase() === 's') endCurrentSession(false, 'skip');
   }
@@ -187,9 +161,8 @@
   function initializeTimer() {
     clearInterval(state.timer.tickId);
     state.timer.tickId = null;
-    const seconds = modeDurationSeconds(state.timer.mode);
-    state.timer.totalSeconds = seconds;
-    state.timer.remainingSeconds = seconds;
+    state.timer.totalSeconds = modeDurationSeconds(state.timer.mode);
+    state.timer.remainingSeconds = state.timer.totalSeconds;
     state.timer.running = false;
     state.timer.paused = false;
     state.timer.startedAtMs = null;
@@ -199,9 +172,6 @@
   function startTimer() {
     if (state.timer.running) return;
     if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) initializeTimer();
-
-    requestNotificationPermissionIfNeeded();
-
     const now = Date.now();
     state.timer.running = true;
     state.timer.paused = false;
@@ -228,13 +198,11 @@
   function syncTimer() {
     if (!state.timer.running || state.timer.paused) return;
     let now = Date.now();
-
     while (state.timer.running && now >= state.timer.endAtMs) {
       endCurrentSession(true, 'elapsed', now);
       now = Date.now();
       if (!state.timer.running) break;
     }
-
     if (state.timer.running) {
       state.timer.remainingSeconds = Math.max(0, Math.ceil((state.timer.endAtMs - now) / 1000));
       renderTimer();
@@ -252,24 +220,24 @@
 
     if (state.timer.startedAtMs || completed) {
       const endAt = completed ? new Date((state.timer.startedAtMs || nowMs) + plannedDuration * 1000) : new Date(nowMs);
-      const note = state.timer.mode === 'focus' ? state.ui.pendingSessionNote : null;
-      state.data.sessions.push({
+      const context = currentContextOrNull();
+      const item = {
         id: makeId(),
         sessionType: normalizeMode(state.timer.mode),
         startTime: new Date(state.timer.startedAtMs || nowMs).toISOString(),
         endTime: endAt.toISOString(),
         durationSeconds,
-        completed,
-        taskId: state.timer.activeTaskId,
-        note: note || undefined,
-      });
-
-      if (completed && state.timer.mode === 'focus' && state.timer.activeTaskId) {
-        const task = state.data.tasks.find((t) => t.id === state.timer.activeTaskId);
-        if (task) task.pomodoros += 1;
-      }
-      if (state.timer.mode === 'focus') state.ui.pendingSessionNote = null;
+        completed
+      };
+      if (context) item.context = context;
+      if (state.timer.pendingBlockTitle) item.note = state.timer.pendingBlockTitle;
+      state.data.sessions.push(item);
+      state.timer.pendingBlockTitle = null;
       debouncedSave();
+      if (completed && state.timer.mode === 'focus') {
+        state.ui.pendingReflectionSessionId = item.id;
+        showReflectionDialog();
+      }
     }
 
     if (completed) {
@@ -302,11 +270,6 @@
     render();
   }
 
-  function nextMode(currentMode, focusCompletedCount, longBreakInterval) {
-    if (currentMode === 'focus') return focusCompletedCount % longBreakInterval === 0 ? 'long_break' : 'short_break';
-    return 'focus';
-  }
-
   function modeDurationSeconds(mode) {
     const s = state.data.settings;
     if (mode === 'focus') return toValidInt(s.focusMinutes, 25, 1, 120) * 60;
@@ -314,19 +277,25 @@
     return toValidInt(s.longBreakMinutes, 15, 1, 120) * 60;
   }
 
+  function nextMode(currentMode, focusCompletedCount, longBreakInterval) {
+    if (currentMode === 'focus') return focusCompletedCount % longBreakInterval === 0 ? 'long_break' : 'short_break';
+    return 'focus';
+  }
+
   function render() {
     renderTabs();
     renderTimer();
-    renderSettings();
-    renderTasks();
     renderPlanner();
+    renderHierarchy();
     renderStats();
+    renderSettings();
+    renderWorkspaceStatus();
     els['status-message'].textContent = state.ui.message;
   }
 
   function renderTabs() {
-    for (const [key, panel] of Object.entries(els.panels)) {
-      const active = state.ui.activeTab === key;
+    for (const [k, panel] of Object.entries(els.panels)) {
+      const active = state.ui.activeTab === k;
       panel.hidden = !active;
       panel.classList.toggle('active', active);
     }
@@ -336,55 +305,36 @@
   function renderTimer() {
     els['mode-label'].textContent = humanMode(state.timer.mode);
     els['timer-display'].textContent = formatSeconds(state.timer.remainingSeconds);
-    const progress = state.timer.totalSeconds ? ((state.timer.totalSeconds - state.timer.remainingSeconds) / state.timer.totalSeconds) * 100 : 0;
-    els['progress-fill'].style.width = `${Math.min(100, Math.max(0, progress))}%`;
-
+    const p = state.timer.totalSeconds ? ((state.timer.totalSeconds - state.timer.remainingSeconds) / state.timer.totalSeconds) * 100 : 0;
+    els['progress-fill'].style.width = `${Math.min(100, Math.max(0, p))}%`;
     els['start-btn'].disabled = state.timer.running || state.timer.paused;
     els['pause-btn'].disabled = !state.timer.running;
     els['resume-btn'].disabled = !state.timer.paused;
     els['auto-start-toggle'].checked = state.data.settings.autoStartNext;
-    populateActiveTaskSelect();
+    renderTimerContextSelectors();
   }
 
-  function renderSettings() {
-    const s = state.data.settings;
-    els['focus-minutes'].value = s.focusMinutes;
-    els['short-break-minutes'].value = s.shortBreakMinutes;
-    els['long-break-minutes'].value = s.longBreakMinutes;
-    els['long-break-interval'].value = s.longBreakInterval;
-    els['sound-toggle'].checked = s.soundEnabled;
-    els['confirm-toggle'].checked = s.endSessionConfirmation;
-    els['warn-unsaved-toggle'].checked = s.warnOnUnsavedExit !== false;
-    els['archive-toggle'].checked = s.archiveCompletedTasks;
-    els['day-start-hour'].value = s.dayStartHour;
-    els['day-end-hour'].value = s.dayEndHour;
-    els['heatmap-metric'].value = s.heatmapMetric;
-    renderWorkspaceStatus();
+  function renderTimerContextSelectors() {
+    const goals = state.data.hierarchy.goals.filter((g) => !g.archived);
+    const projects = state.data.hierarchy.projects.filter((p) => !p.archived && (!state.ui.activeContext.goalId || p.goalId === state.ui.activeContext.goalId));
+    const topics = state.data.hierarchy.topics.filter((t) => !t.archived && (!state.ui.activeContext.projectId || t.projectId === state.ui.activeContext.projectId));
+    els['active-goal-select'].innerHTML = optionHtml('No goal', goals, state.ui.activeContext.goalId);
+    els['active-project-select'].innerHTML = optionHtml('No project', projects, state.ui.activeContext.projectId);
+    els['active-topic-select'].innerHTML = optionHtml('No topic', topics, state.ui.activeContext.topicId);
   }
 
-  function renderTasks() {
-    const hideArchived = state.data.settings.archiveCompletedTasks;
-    const tasks = hideArchived ? state.data.tasks.filter((t) => !t.archived) : state.data.tasks;
-    els['task-list'].innerHTML = tasks.map((task) => `
-      <li class="task-item" data-task-id="${task.id}">
-        <div class="task-main">
-          <input type="radio" name="active-task" ${task.id === state.timer.activeTaskId ? 'checked' : ''} aria-label="Select task ${escapeHtml(task.name)}" />
-          <strong>${escapeHtml(task.name)}</strong>
-          <span>🍅 ${task.pomodoros}</span>
-          ${task.archived ? '<em>(archived)</em>' : ''}
-        </div>
-        <div class="task-actions">
-          <button class="btn" data-action="rename">Rename</button>
-          <button class="btn" data-action="archive">${task.archived ? 'Unarchive' : 'Archive'}</button>
-          <button class="btn danger" data-action="delete">Delete</button>
-        </div>
-      </li>`).join('') || '<li>No tasks yet.</li>';
+  function onTimerContextChange() {
+    state.ui.activeContext.goalId = els['active-goal-select'].value;
+    state.ui.activeContext.projectId = els['active-project-select'].value;
+    state.ui.activeContext.topicId = els['active-topic-select'].value;
+    if (!state.ui.activeContext.projectId) state.ui.activeContext.topicId = '';
+    renderTimerContextSelectors();
   }
 
   function renderPlanner() {
     els['planner-date'].value = state.ui.plannerDate;
-    const day = getPlannerDay(state.ui.plannerDate);
     renderPlannerHours();
+    const day = getDay(state.ui.plannerDate);
     renderTimeline(day.timeBlocks);
     renderDailyTodos(day.dailyTodos);
   }
@@ -402,198 +352,55 @@
     const s = state.data.settings;
     const startDayMinutes = s.dayStartHour * 60;
     const rangeMinutes = (s.dayEndHour - s.dayStartHour) * 60;
-
-    const html = [...blocks].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)).map((block) => {
-      const start = timeToMinutes(block.start);
-      const end = timeToMinutes(block.end);
+    const html = [...blocks].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)).map((b) => {
+      const start = timeToMinutes(b.start);
+      const end = timeToMinutes(b.end);
       const top = ((start - startDayMinutes) / rangeMinutes) * 100;
       const height = Math.max(3, ((end - start) / rangeMinutes) * 100);
-      return `<div class="time-block" style="top:${top}%;height:${height}%;" data-block-id="${block.id}">
-        <div><strong>${escapeHtml(block.title)}</strong><br/>${block.start} - ${block.end}</div>
-        <div class="block-actions">
-          <button class="btn" data-action="start-focus">Focus</button>
-          <button class="btn" data-action="edit">Edit</button>
-          <button class="btn danger" data-action="delete">Delete</button>
-        </div>
-      </div>`;
+      return `<div class="time-block" style="top:${top}%;height:${height}%" data-block-id="${b.id}"><div><strong>${escapeHtml(b.title)}</strong><br>${b.start} - ${b.end}</div><div class="block-actions"><button class="btn" data-action="start-focus">Focus</button><button class="btn" data-action="edit">Edit</button><button class="btn danger" data-action="delete">Delete</button></div></div>`;
     }).join('');
-
     els['planner-timeline'].innerHTML = html || '<p style="padding:.6rem;color:var(--muted)">No time blocks for this day.</p>';
   }
 
   function renderDailyTodos(todos) {
-    els['todo-list'].innerHTML = todos.map((todo, index) => `
-      <li class="task-item" data-todo-id="${todo.id}">
-        <div class="task-main">
-          <input type="checkbox" ${todo.done ? 'checked' : ''} data-action="toggle" aria-label="Toggle todo" />
-          <span>${todo.done ? '<s>' : ''}${escapeHtml(todo.text)}${todo.done ? '</s>' : ''}</span>
-          ${todo.scheduled ? '<em>Scheduled</em>' : ''}
-        </div>
-        <div class="task-actions">
-          <button class="btn" data-action="up" ${index === 0 ? 'disabled' : ''}>↑</button>
-          <button class="btn" data-action="down" ${index === todos.length - 1 ? 'disabled' : ''}>↓</button>
-          <button class="btn" data-action="edit">Edit</button>
-          <button class="btn" data-action="schedule">Schedule</button>
-          <button class="btn danger" data-action="delete">Delete</button>
-        </div>
-      </li>`).join('') || '<li>No todos for this day.</li>';
-  }
-
-  function renderStats() {
-    const stats = computeStats(state.data.sessions);
-    els['today-focus-minutes'].textContent = stats.todayFocusMinutes;
-    els['today-focus-count'].textContent = stats.todayFocusCount;
-    els['streak-days'].textContent = stats.streakDays;
-    els['best-day'].textContent = stats.bestDayMinutes;
-    els['total-focus-hours'].textContent = (stats.totalFocusMinutes / 60).toFixed(1);
-
-    renderWeekChart(stats.last7Days);
-    renderHistory();
-    renderHeatmap(stats.daily);
-    renderHeatmapDetail();
-  }
-
-  function renderWeekChart(last7Days) {
-    const max = Math.max(1, ...last7Days.map((d) => d.minutes));
-    els['week-chart'].innerHTML = last7Days.map((d) => {
-      const h = (d.minutes / max) * 100;
-      return `<div class="bar"><div class="bar-value">${d.minutes}</div><div class="bar-rect" style="height:${h}%"></div><div class="bar-label">${d.label}</div></div>`;
-    }).join('');
-  }
-
-  function renderHeatmap(dailyMap) {
-    const metric = state.data.settings.heatmapMetric;
-    const days = [];
-    for (let i = 364; i >= 0; i -= 1) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = dayKey(d);
-      const val = dailyMap.get(key) || { minutes: 0, sessions: 0 };
-      days.push({ key, value: metric === 'focus_minutes' ? val.minutes : val.sessions });
-    }
-    const max = Math.max(1, ...days.map((d) => d.value));
-    els['heatmap-grid'].innerHTML = days.map((d) => {
-      const ratio = d.value / max;
-      const lvl = d.value === 0 ? 0 : ratio > 0.75 ? 4 : ratio > 0.5 ? 3 : ratio > 0.25 ? 2 : 1;
-      return `<button class="heatmap-cell heat-${lvl}" data-date="${d.key}" title="${d.key}: ${d.value}"></button>`;
-    }).join('');
-  }
-
-  function renderHeatmapDetail() {
-    const detailEl = els['heatmap-detail'];
-    const day = state.ui.selectedHeatmapDay;
-    if (!day) {
-      detailEl.hidden = true;
-      detailEl.innerHTML = '';
-      return;
-    }
-
-    const sessions = state.data.sessions.filter((s) => dayKey(new Date(s.endTime)) === day && s.sessionType === 'focus' && s.completed);
-    const taskMap = new Map(state.data.tasks.map((t) => [t.id, t.name]));
-    const minutes = Math.round(sessions.reduce((sum, s) => sum + s.durationSeconds / 60, 0));
-    detailEl.hidden = false;
-    detailEl.innerHTML = `
-      <h3>${day}</h3>
-      <p>Focus minutes: <strong>${minutes}</strong> | Completed focus sessions: <strong>${sessions.length}</strong></p>
-      <ul>${sessions.map((s) => `<li>${new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${escapeHtml(taskMap.get(s.taskId) || 'No task')}${s.note ? ` · ${escapeHtml(s.note)}` : ''}</li>`).join('') || '<li>No completed focus sessions.</li>'}</ul>
-      <button class="btn" data-action="open-planner">Open Planner</button>
-    `;
-  }
-
-  function renderHistory() {
-    const tasksMap = new Map(state.data.tasks.map((t) => [t.id, t.name]));
-    let entries = [...state.data.sessions].reverse().slice(0, 100);
-    if (state.ui.historyFilter === 'focus') entries = entries.filter((s) => s.sessionType === 'focus');
-    els['history-body'].innerHTML = entries.map((s) => `
-      <tr>
-        <td>${s.sessionType}</td>
-        <td>${formatDateTime(s.startTime)}</td>
-        <td>${formatDateTime(s.endTime)}</td>
-        <td>${Math.round(s.durationSeconds / 60)}</td>
-        <td>${s.completed ? 'Yes' : 'No'}</td>
-        <td>${s.taskId ? escapeHtml(tasksMap.get(s.taskId) || '(deleted)') : '—'}${s.note ? ` · ${escapeHtml(s.note)}` : ''}</td>
-      </tr>
-    `).join('') || '<tr><td colspan="6">No session history.</td></tr>';
-  }
-
-  function onAddTask(e) {
-    e.preventDefault();
-    const name = els['new-task-input'].value.trim();
-    if (!name) return;
-    state.data.tasks.push({ id: makeId(), name, pomodoros: 0, archived: false, createdAt: new Date().toISOString() });
-    els['new-task-input'].value = '';
-    debouncedSave();
-    render();
-  }
-
-  function onTaskListClick(e) {
-    const li = e.target.closest('[data-task-id]');
-    if (!li) return;
-    const taskId = li.dataset.taskId;
-    const task = state.data.tasks.find((t) => t.id === taskId);
-    if (!task) return;
-
-    if (e.target.matches('input[type="radio"]')) state.timer.activeTaskId = taskId;
-    else if (e.target.dataset.action === 'rename') {
-      const name = prompt('Rename task', task.name);
-      if (name && name.trim()) task.name = name.trim();
-    } else if (e.target.dataset.action === 'archive') task.archived = !task.archived;
-    else if (e.target.dataset.action === 'delete' && confirm('Delete task?')) {
-      state.data.tasks = state.data.tasks.filter((t) => t.id !== taskId);
-      if (state.timer.activeTaskId === taskId) state.timer.activeTaskId = null;
-    }
-
-    debouncedSave();
-    render();
+    els['todo-list'].innerHTML = todos.map((todo, i) => `<li class="task-item" data-todo-id="${todo.id}"><div class="task-main"><input type="checkbox" ${todo.done ? 'checked' : ''} data-action="toggle"><span>${todo.done ? '<s>' : ''}${escapeHtml(todo.text)}${todo.done ? '</s>' : ''}</span>${todo.scheduled ? '<em>Scheduled</em>' : ''}</div><div class="task-actions"><button class="btn" data-action="up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="btn" data-action="down" ${i === todos.length - 1 ? 'disabled' : ''}>↓</button><button class="btn" data-action="edit">Edit</button><button class="btn" data-action="schedule">Schedule</button><button class="btn danger" data-action="delete">Delete</button></div></li>`).join('') || '<li>No todos for this day.</li>';
   }
 
   function onSaveBlock(e) {
     e.preventDefault();
-    const date = state.ui.plannerDate;
-    const day = getPlannerDay(date);
+    const day = getDay(state.ui.plannerDate);
     const start = els['block-start'].value;
     const end = els['block-end'].value;
     const title = els['block-title'].value.trim();
-    if (!validateBlock(start, end)) return setMessage('Invalid block time. Ensure within day bounds and start < end.', true);
-    if (!title) return setMessage('Block title is required.', true);
-
+    if (!validateBlock(start, end)) return setMessage('Invalid block time.', true);
+    if (!title) return;
     const id = els['block-id'].value;
     if (id) {
-      const block = day.timeBlocks.find((b) => b.id === id);
-      if (block) Object.assign(block, { start, end, title });
+      const b = day.timeBlocks.find((x) => x.id === id);
+      if (b) Object.assign(b, { start, end, title });
     } else {
-      day.timeBlocks.push({ id: makeId(), start, end, title, createdAt: new Date().toISOString(), source: 'manual', todoId: null });
+      day.timeBlocks.push({ id: makeId(), start, end, title, source: 'manual', todoId: null });
     }
-
     clearBlockForm();
     debouncedSave();
     renderPlanner();
   }
 
-  function onPlannerTimelineClick(e) {
-    const blockEl = e.target.closest('[data-block-id]');
-    if (!blockEl) return;
-    const blockId = blockEl.dataset.blockId;
-    const day = getPlannerDay(state.ui.plannerDate);
-    const block = day.timeBlocks.find((b) => b.id === blockId);
-    if (!block) return;
+  function clearBlockForm() { els['block-id'].value = ''; els['block-start'].value = ''; els['block-end'].value = ''; els['block-title'].value = ''; }
 
+  function onPlannerClick(e) {
+    const el = e.target.closest('[data-block-id]');
+    if (!el) return;
+    const day = getDay(state.ui.plannerDate);
+    const block = day.timeBlocks.find((b) => b.id === el.dataset.blockId);
+    if (!block) return;
     const action = e.target.dataset.action;
     if (action === 'edit') {
-      els['block-id'].value = block.id;
-      els['block-start'].value = block.start;
-      els['block-end'].value = block.end;
-      els['block-title'].value = block.title;
+      els['block-id'].value = block.id; els['block-start'].value = block.start; els['block-end'].value = block.end; els['block-title'].value = block.title;
     } else if (action === 'delete') {
-      day.timeBlocks = day.timeBlocks.filter((b) => b.id !== blockId);
-      day.dailyTodos.forEach((todo) => {
-        if (todo.blockId === blockId) {
-          todo.blockId = null;
-          todo.scheduled = false;
-        }
-      });
-      debouncedSave();
-      renderPlanner();
+      day.timeBlocks = day.timeBlocks.filter((b) => b.id !== block.id);
+      day.dailyTodos.forEach((t) => { if (t.blockId === block.id) { t.blockId = null; t.scheduled = false; } });
+      debouncedSave(); renderPlanner();
     } else if (action === 'start-focus') {
       startFocusFromBlock(block);
     }
@@ -604,90 +411,263 @@
       endCurrentSession(false, 'reset');
       if (state.timer.running || state.timer.paused) return;
     }
-    state.ui.pendingSessionNote = block.title;
     state.timer.mode = 'focus';
+    state.timer.pendingBlockTitle = block.title;
     initializeTimer();
     state.ui.activeTab = 'timer';
     startTimer();
     setMessage(`Started focus from block: ${block.title}`);
   }
 
-  function clearBlockForm() {
-    els['block-id'].value = '';
-    els['block-start'].value = '';
-    els['block-end'].value = '';
-    els['block-title'].value = '';
-  }
-
   function onAddTodo(e) {
     e.preventDefault();
     const text = els['todo-input'].value.trim();
     if (!text) return;
-    const day = getPlannerDay(state.ui.plannerDate);
-    day.dailyTodos.push({ id: makeId(), text, done: false, createdAt: new Date().toISOString(), scheduled: false, blockId: null });
+    getDay(state.ui.plannerDate).dailyTodos.push({ id: makeId(), text, done: false, scheduled: false, blockId: null });
     els['todo-input'].value = '';
     debouncedSave();
     renderPlanner();
   }
 
-  function onTodoListClick(e) {
+  function onTodoClick(e) {
     const li = e.target.closest('[data-todo-id]');
     if (!li) return;
-    const todoId = li.dataset.todoId;
-    const day = getPlannerDay(state.ui.plannerDate);
-    const idx = day.dailyTodos.findIndex((t) => t.id === todoId);
+    const day = getDay(state.ui.plannerDate);
+    const idx = day.dailyTodos.findIndex((t) => t.id === li.dataset.todoId);
     if (idx < 0) return;
     const todo = day.dailyTodos[idx];
-    const action = e.target.dataset.action;
-
-    if (action === 'toggle') todo.done = !todo.done;
-    else if (action === 'edit') {
-      const nextText = prompt('Edit todo', todo.text);
-      if (nextText && nextText.trim()) todo.text = nextText.trim();
-    } else if (action === 'delete') {
-      day.dailyTodos.splice(idx, 1);
-      if (todo.blockId) day.timeBlocks = day.timeBlocks.filter((b) => b.id !== todo.blockId);
-    } else if (action === 'up' && idx > 0) {
-      [day.dailyTodos[idx - 1], day.dailyTodos[idx]] = [day.dailyTodos[idx], day.dailyTodos[idx - 1]];
-    } else if (action === 'down' && idx < day.dailyTodos.length - 1) {
-      [day.dailyTodos[idx + 1], day.dailyTodos[idx]] = [day.dailyTodos[idx], day.dailyTodos[idx + 1]];
-    } else if (action === 'schedule') {
+    const a = e.target.dataset.action;
+    if (a === 'toggle') todo.done = !todo.done;
+    else if (a === 'edit') { const txt = prompt('Edit todo', todo.text); if (txt && txt.trim()) todo.text = txt.trim(); }
+    else if (a === 'delete') { day.dailyTodos.splice(idx, 1); if (todo.blockId) day.timeBlocks = day.timeBlocks.filter((b) => b.id !== todo.blockId); }
+    else if (a === 'up' && idx > 0) [day.dailyTodos[idx - 1], day.dailyTodos[idx]] = [day.dailyTodos[idx], day.dailyTodos[idx - 1]];
+    else if (a === 'down' && idx < day.dailyTodos.length - 1) [day.dailyTodos[idx + 1], day.dailyTodos[idx]] = [day.dailyTodos[idx], day.dailyTodos[idx + 1]];
+    else if (a === 'schedule') {
       const start = prompt('Start time (HH:MM)', '09:00');
       const end = prompt('End time (HH:MM)', '09:30');
-      if (!start || !end) return;
-      if (!validateBlock(start, end)) return setMessage('Invalid schedule time for todo.', true);
-
+      if (!start || !end || !validateBlock(start, end)) return;
       const blockId = makeId();
-      day.timeBlocks.push({ id: blockId, start, end, title: todo.text, createdAt: new Date().toISOString(), source: 'todo', todoId: todo.id });
-      todo.scheduled = true;
-      todo.blockId = blockId;
+      day.timeBlocks.push({ id: blockId, start, end, title: todo.text, source: 'todo', todoId: todo.id });
+      todo.scheduled = true; todo.blockId = blockId;
     }
-
     debouncedSave();
     renderPlanner();
   }
 
+  function renderHierarchy() {
+    renderGoalProjectTopicSelectors();
+    const goals = state.data.hierarchy.goals;
+    const projects = state.data.hierarchy.projects;
+    const topics = state.data.hierarchy.topics;
+    els['goal-list'].innerHTML = goals.map((g) => `<li class="task-item" data-goal-id="${g.id}"><div class="task-main"><strong>${escapeHtml(g.name)}</strong>${g.archived ? '<em>(archived)</em>' : ''}</div><div class="task-actions"><button class="btn" data-action="rename">Rename</button><button class="btn" data-action="archive">${g.archived ? 'Unarchive' : 'Archive'}</button><button class="btn danger" data-action="delete">Delete</button></div></li>`).join('') || '<li>No goals yet.</li>';
+    const goalMap = new Map(goals.map((g) => [g.id, g.name]));
+    els['project-list'].innerHTML = projects.map((p) => `<li class="task-item" data-project-id="${p.id}"><div class="task-main"><strong>${escapeHtml(p.name)}</strong><span>Goal: ${escapeHtml(goalMap.get(p.goalId) || 'Unknown')}</span>${p.archived ? '<em>(archived)</em>' : ''}</div><div class="task-actions"><button class="btn" data-action="rename">Rename</button><button class="btn" data-action="archive">${p.archived ? 'Unarchive' : 'Archive'}</button><button class="btn danger" data-action="delete">Delete</button></div></li>`).join('') || '<li>No projects yet.</li>';
+    const projectMap = new Map(projects.map((p) => [p.id, p.name]));
+    els['topic-list'].innerHTML = topics.map((t) => `<li class="task-item" data-topic-id="${t.id}"><div class="task-main"><strong>${escapeHtml(t.name)}</strong><span>Project: ${escapeHtml(projectMap.get(t.projectId) || 'Unknown')}</span>${t.archived ? '<em>(archived)</em>' : ''}</div><div class="task-actions"><button class="btn" data-action="rename">Rename</button><button class="btn" data-action="archive">${t.archived ? 'Unarchive' : 'Archive'}</button><button class="btn danger" data-action="delete">Delete</button></div></li>`).join('') || '<li>No topics yet.</li>';
+  }
+
+  function renderGoalProjectTopicSelectors() {
+    const goals = state.data.hierarchy.goals.filter((g) => !g.archived);
+    const projects = state.data.hierarchy.projects.filter((p) => !p.archived);
+    els['project-goal-select'].innerHTML = optionHtml('Select goal', goals, '');
+    els['topic-project-select'].innerHTML = optionHtml('Select project', projects, '');
+  }
+
+  function onAddGoal(e) { e.preventDefault(); const name = els['goal-input'].value.trim(); if (!name) return; state.data.hierarchy.goals.push({ id: makeId(), name, archived: false }); els['goal-input'].value=''; debouncedSave(); renderHierarchy(); }
+  function onAddProject(e) { e.preventDefault(); const goalId = els['project-goal-select'].value; const name = els['project-input'].value.trim(); if (!goalId) return setMessage('Select a goal first.', true); if (!name) return; state.data.hierarchy.projects.push({ id: makeId(), goalId, name, archived: false }); els['project-input'].value=''; debouncedSave(); renderHierarchy(); }
+  function onAddTopic(e) { e.preventDefault(); const projectId = els['topic-project-select'].value; const name = els['topic-input'].value.trim(); if (!projectId) return setMessage('Select a project first.', true); if (!name) return; state.data.hierarchy.topics.push({ id: makeId(), projectId, name, archived: false }); els['topic-input'].value=''; debouncedSave(); renderHierarchy(); }
+
+  function onGoalListClick(e) { handleEntityActions(e, 'goal', state.data.hierarchy.goals); }
+  function onProjectListClick(e) { handleEntityActions(e, 'project', state.data.hierarchy.projects); }
+  function onTopicListClick(e) { handleEntityActions(e, 'topic', state.data.hierarchy.topics); }
+
+  function handleEntityActions(e, kind, list) {
+    const li = e.target.closest(`[data-${kind}-id]`); if (!li) return;
+    const id = li.dataset[`${kind}Id`]; const item = list.find((x) => x.id === id); if (!item) return;
+    const a = e.target.dataset.action;
+    if (a === 'rename') { const name = prompt(`Rename ${kind}`, item.name); if (name && name.trim()) item.name = name.trim(); }
+    else if (a === 'archive') item.archived = !item.archived;
+    else if (a === 'delete' && confirm(`Delete ${kind}?`)) {
+      const idx = list.findIndex((x) => x.id === id); if (idx >= 0) list.splice(idx, 1);
+      if (kind === 'goal') state.data.hierarchy.projects.forEach((p) => { if (p.goalId === id) p.archived = true; });
+      if (kind === 'project') state.data.hierarchy.topics.forEach((t) => { if (t.projectId === id) t.archived = true; });
+    }
+    debouncedSave();
+    renderHierarchy();
+  }
+
+  function renderStats() {
+    const stats = computeStats();
+    els['today-focus-minutes'].textContent = stats.todayFocusMinutes;
+    els['today-focus-count'].textContent = stats.todayFocusCount;
+    els['streak-days'].textContent = stats.currentStreak;
+    els['longest-streak-days'].textContent = stats.longestStreak;
+    els['total-focus-hours'].textContent = (stats.totalFocusMinutes / 60).toFixed(1);
+    renderHeatmap(stats.dailyMap);
+    renderHeatmapDetail();
+    renderWeeklySummary(stats);
+    renderWeeklyReview();
+  }
+
+  function computeStats() {
+    const focus = state.data.sessions.filter((s) => s.sessionType === 'focus' && s.completed);
+    const todayStr = dayKey(new Date());
+    const dailyMap = new Map();
+    focus.forEach((s) => {
+      const key = dayKey(new Date(s.endTime));
+      const cur = dailyMap.get(key) || { minutes: 0, sessions: 0 };
+      cur.minutes += s.durationSeconds / 60;
+      cur.sessions += 1;
+      dailyMap.set(key, cur);
+    });
+    const currentStreak = calculateCurrentStreak(dailyMap);
+    const longestStreak = calculateLongestStreak(dailyMap);
+    const today = dailyMap.get(todayStr) || { minutes: 0, sessions: 0 };
+    const totalFocusMinutes = Math.round([...dailyMap.values()].reduce((a, b) => a + b.minutes, 0));
+    return { dailyMap, currentStreak, longestStreak, todayFocusMinutes: Math.round(today.minutes), todayFocusCount: today.sessions, totalFocusMinutes };
+  }
+
+  function calculateCurrentStreak(dailyMap) {
+    let streak = 0; const d = new Date();
+    while (true) { const key = dayKey(d); if ((dailyMap.get(key)?.sessions || 0) > 0) { streak += 1; d.setDate(d.getDate() - 1); } else break; }
+    return streak;
+  }
+
+  function calculateLongestStreak(dailyMap) {
+    const keys = [...dailyMap.keys()].sort();
+    let best = 0, run = 0, prev = null;
+    keys.forEach((k) => {
+      if ((dailyMap.get(k)?.sessions || 0) <= 0) return;
+      if (!prev) run = 1;
+      else {
+        const pd = new Date(prev + 'T00:00:00');
+        pd.setDate(pd.getDate() + 1);
+        run = dayKey(pd) === k ? run + 1 : 1;
+      }
+      prev = k;
+      best = Math.max(best, run);
+    });
+    return best;
+  }
+
+  function renderHeatmap(dailyMap) {
+    const metric = state.data.settings.heatmapMetric;
+    const days = [];
+    for (let i = 364; i >= 0; i -= 1) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = dayKey(d); const val = dailyMap.get(key) || { minutes: 0, sessions: 0 };
+      days.push({ key, value: metric === 'focus_minutes' ? val.minutes : val.sessions });
+    }
+    const max = Math.max(1, ...days.map((d) => d.value));
+    els['heatmap-grid'].innerHTML = days.map((d) => {
+      const r = d.value / max;
+      const lvl = d.value === 0 ? 0 : r > 0.75 ? 4 : r > 0.5 ? 3 : r > 0.25 ? 2 : 1;
+      return `<button class="heatmap-cell heat-${lvl}" data-date="${d.key}" title="${d.key}: ${d.value}"></button>`;
+    }).join('');
+  }
+
   function onHeatmapClick(e) {
-    const cell = e.target.closest('[data-date]');
-    if (!cell) return;
+    const cell = e.target.closest('[data-date]'); if (!cell) return;
     state.ui.selectedHeatmapDay = cell.dataset.date;
     renderHeatmapDetail();
   }
 
-  function onHeatmapDetailClick(e) {
-    if (e.target.dataset.action !== 'open-planner') return;
-    if (!state.ui.selectedHeatmapDay) return;
-    state.ui.plannerDate = state.ui.selectedHeatmapDay;
-    state.ui.activeTab = 'planner';
-    render();
+  function renderHeatmapDetail() {
+    const day = state.ui.selectedHeatmapDay;
+    const detail = els['heatmap-detail'];
+    if (!day) { detail.hidden = true; detail.innerHTML = ''; return; }
+    const sessions = state.data.sessions.filter((s) => s.sessionType === 'focus' && s.completed && dayKey(new Date(s.endTime)) === day);
+    const minutes = Math.round(sessions.reduce((a, s) => a + s.durationSeconds / 60, 0));
+    detail.hidden = false;
+    detail.innerHTML = `<h3>${day}</h3><p>Focus minutes: <strong>${minutes}</strong> | Completed sessions: <strong>${sessions.length}</strong></p><ul>${sessions.map((s) => `<li>${new Date(s.startTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · ${contextLabel(s.context)}${s.quality ? ` · rating ${s.quality.rating}` : ''}</li>`).join('') || '<li>No sessions.</li>'}</ul>`;
+  }
+
+  function renderWeeklySummary() {
+    const key = isoWeekKey(new Date());
+    const [year, week] = key.split('-W').map(Number);
+    const sessions = state.data.sessions.filter((s) => s.sessionType === 'focus' && s.completed && isoWeekKey(new Date(s.endTime)) === `${year}-W${String(week).padStart(2, '0')}`);
+    const totalMinutes = Math.round(sessions.reduce((a, s) => a + s.durationSeconds / 60, 0));
+    const dayMap = new Map();
+    const contextMap = new Map();
+    sessions.forEach((s) => {
+      const d = dayKey(new Date(s.endTime));
+      dayMap.set(d, (dayMap.get(d) || 0) + s.durationSeconds / 60);
+      const c = contextLabel(s.context);
+      contextMap.set(c, (contextMap.get(c) || 0) + s.durationSeconds / 60);
+    });
+    let bestDay = '—', bestDayMin = 0;
+    for (const [d, m] of dayMap) if (m > bestDayMin) { bestDayMin = m; bestDay = d; }
+    let topContext = 'No context', topContextMin = 0;
+    for (const [c, m] of contextMap) if (m > topContextMin) { topContextMin = m; topContext = c; }
+    els['weekly-summary'].innerHTML = `<p>Week ${key}</p><p>Total focus: <strong>${totalMinutes}</strong> min</p><p>Best day: <strong>${bestDay}</strong> (${Math.round(bestDayMin)} min)</p><p>Top context: <strong>${escapeHtml(topContext)}</strong></p>`;
+  }
+
+  function renderWeeklyReview() {
+    const review = state.data.reviews.weeks[isoWeekKey(new Date())] || { reflection: '', intention: '' };
+    els['weekly-reflection'].value = review.reflection || '';
+    els['weekly-intention'].value = review.intention || '';
+  }
+
+  function onSaveWeeklyReview(e) {
+    e.preventDefault();
+    const key = isoWeekKey(new Date());
+    state.data.reviews.weeks[key] = { reflection: els['weekly-reflection'].value.trim(), intention: els['weekly-intention'].value.trim(), updatedAt: new Date().toISOString() };
+    debouncedSave();
+    setMessage(`Weekly review saved (${key}).`);
+  }
+
+  function showReflectionDialog() {
+    if (!els['reflection-dialog'].showModal) return;
+    els['reflection-rating'].value = '3';
+    els['reflection-distractions'].value = '0';
+    els['reflection-note'].value = '';
+    els['reflection-dialog'].showModal();
+  }
+
+  function onSaveReflection(e) {
+    e.preventDefault();
+    const id = state.ui.pendingReflectionSessionId;
+    if (!id) { els['reflection-dialog'].close(); return; }
+    const s = state.data.sessions.find((x) => x.id === id);
+    if (s) {
+      s.quality = {
+        rating: toValidInt(els['reflection-rating'].value, 3, 1, 5),
+        distractions: toValidInt(els['reflection-distractions'].value, 0, 0, 999),
+        note: String(els['reflection-note'].value || '').trim()
+      };
+      debouncedSave();
+    }
+    state.ui.pendingReflectionSessionId = null;
+    els['reflection-dialog'].close();
+  }
+
+  function renderSettings() {
+    const s = state.data.settings;
+    els['focus-minutes'].value = s.focusMinutes;
+    els['short-break-minutes'].value = s.shortBreakMinutes;
+    els['long-break-minutes'].value = s.longBreakMinutes;
+    els['long-break-interval'].value = s.longBreakInterval;
+    els['daily-focus-target-minutes'].value = s.dailyFocusTargetMinutes;
+    els['sound-toggle'].checked = s.soundEnabled;
+    els['confirm-toggle'].checked = s.endSessionConfirmation;
+    els['warn-unsaved-toggle'].checked = s.warnOnUnsavedChanges !== false;
+    els['day-start-hour'].value = s.dayStartHour;
+    els['day-end-hour'].value = s.dayEndHour;
+    els['heatmap-metric'].value = s.heatmapMetric;
+  }
+
+  function updateSetting(key, value) {
+    state.data.settings = sanitizeSettings({ ...state.data.settings, [key]: value });
+    if (key === 'theme') applyTheme();
+    debouncedSave();
+    setMessage('Settings updated.');
   }
 
   function updatePlannerHours() {
     const start = Number(els['day-start-hour'].value);
     const end = Number(els['day-end-hour'].value);
     if (!(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end <= 24 && start < end)) {
-      setMessage('Invalid planner hours. dayStartHour must be < dayEndHour and both within 0..24.', true);
-      renderSettings();
+      setMessage('Invalid planner hours.', true);
       return;
     }
     updateSetting('dayStartHour', start);
@@ -695,45 +675,21 @@
     renderPlanner();
   }
 
-  function getPlannerDay(dateKey) {
-    if (!state.data.planner.days[dateKey]) {
-      state.data.planner.days[dateKey] = { notes: '', dailyTodos: [], timeBlocks: [] };
-    }
-    return state.data.planner.days[dateKey];
+  function cycleTheme() {
+    const c = state.data.settings.theme;
+    const n = c === 'system' ? 'light' : c === 'light' ? 'dark' : 'system';
+    updateSetting('theme', n);
+    setMessage(`Theme: ${n}`);
   }
 
-  function validateBlock(start, end) {
-    const s = timeToMinutes(start);
-    const e = timeToMinutes(end);
-    if (s < 0 || e < 0 || e <= s) return false;
-    const dayStart = state.data.settings.dayStartHour * 60;
-    const dayEnd = state.data.settings.dayEndHour * 60;
-    return s >= dayStart && e <= dayEnd;
-  }
-
-  function timeToMinutes(hhmm) {
-    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm || '');
-    if (!m) return -1;
-    return Number(m[1]) * 60 + Number(m[2]);
-  }
-
-  function populateActiveTaskSelect() {
-    const options = ['<option value="">No task</option>', ...state.data.tasks.filter((t) => !t.archived).map((task) => `<option value="${task.id}">${escapeHtml(task.name)} (${task.pomodoros})</option>`)].join('');
-    els['active-task-select'].innerHTML = options;
-    els['active-task-select'].value = state.timer.activeTaskId || '';
-  }
-
-  function updateSetting(key, value) {
-    state.data.settings = sanitizeSettings({ ...state.data.settings, [key]: value });
-    markDirty();
-    debouncedSave();
-    if (key === 'theme') applyTheme();
-    setMessage('Settings updated.');
+  function applyTheme() {
+    const t = state.data.settings.theme;
+    const resolved = t === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : t;
+    document.documentElement.setAttribute('data-theme', resolved);
   }
 
   function exportData() {
-    const date = new Date().toISOString().slice(0, 10);
-    const filename = `mypomodoro_backup_${date}.json`;
+    const filename = `mypomodoro_backup_${new Date().toISOString().slice(0, 10)}.json`;
     downloadJson(filename);
     setMessage(`Exported ${filename}`);
   }
@@ -750,23 +706,19 @@
     state.ui.pendingFilePurpose = 'import';
   }
 
-
-  function importWorkspaceJsonText(text, fileName = 'Workspace JSON') {
+  function importWorkspaceJsonText(text, fileName) {
     try {
-      const parsed = validateImport(JSON.parse(text));
-      state.data = parsed;
+      state.data = validateImport(JSON.parse(text));
       persistData(state.data);
       initializeTimer();
       state.workspace.handle = null;
       state.workspace.usingFileHandle = false;
-      state.workspace.name = fileName;
-      state.workspace.lastSavedFilename = fileName;
+      state.workspace.name = fileName || 'Workspace JSON';
+      state.workspace.lastSavedFilename = state.workspace.name;
       clearDirty();
       render();
-      setMessage(`Workspace loaded: ${fileName}`);
-    } catch (err) {
-      setMessage(`Workspace load failed: ${err.message}`, true);
-    }
+      setMessage(`Workspace loaded: ${state.workspace.name}`);
+    } catch (err) { setMessage(`Workspace load failed: ${err.message}`, true); }
   }
 
   function importJsonText(text) {
@@ -777,78 +729,54 @@
       if (choice.toLowerCase() === 'replace') state.data = parsed;
       else if (choice.toLowerCase() === 'merge') state.data = mergeData(state.data, parsed);
       else return setMessage('Import cancelled: unrecognized mode.', true);
-
       persistData(state.data);
-      markDirty();
+      debouncedSave();
       initializeTimer();
       render();
       setMessage('Import successful.');
-    } catch (err) {
-      setMessage(`Import failed: ${err.message}`, true);
-    }
+    } catch (err) { setMessage(`Import failed: ${err.message}`, true); }
   }
 
   async function copyDataToClipboard() {
-    if (!navigator.clipboard) return setMessage('Clipboard API is unavailable in this browser context.', true);
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(state.data, null, 2));
-      setMessage('Data copied to clipboard.');
-    } catch {
-      setMessage('Copy to clipboard failed.', true);
-    }
+    if (!navigator.clipboard) return setMessage('Clipboard API is unavailable.', true);
+    try { await navigator.clipboard.writeText(JSON.stringify(state.data, null, 2)); setMessage('Data copied to clipboard.'); }
+    catch { setMessage('Copy failed.', true); }
   }
 
   async function pasteDataFromClipboard() {
-    if (!navigator.clipboard) return setMessage('Clipboard API is unavailable in this browser context.', true);
-    try {
-      importJsonText(await navigator.clipboard.readText());
-    } catch {
-      setMessage('Paste from clipboard failed.', true);
-    }
+    if (!navigator.clipboard) return setMessage('Clipboard API is unavailable.', true);
+    try { importJsonText(await navigator.clipboard.readText()); }
+    catch { setMessage('Paste failed.', true); }
   }
 
   function resetAllData() {
-    if (!confirm('Reset all tasks, sessions, planner data, and settings?')) return;
-    state.data = structuredClone(DEFAULT_DATA);
-    state.timer.phaseCount = 0;
-    state.timer.activeTaskId = null;
-    state.ui.plannerDate = dayKey(new Date());
+    if (!confirm('Reset all data?')) return;
+    state.data = freshData();
     persistData(state.data);
     markDirty();
     initializeTimer();
-    initializeWorkspaceManager();
+    debouncedSave();
     render();
     setMessage('All data reset.');
   }
 
-  function cycleTheme() {
-    const current = state.data.settings.theme;
-    const next = current === 'system' ? 'light' : current === 'light' ? 'dark' : 'system';
-    updateSetting('theme', next);
-    setMessage(`Theme: ${next}`);
-  }
-
-  function applyTheme() {
-    const t = state.data.settings.theme;
-    const resolved = t === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : t;
-    document.documentElement.setAttribute('data-theme', resolved);
-  }
-
   function loadData() {
     try {
-      const rawV2 = localStorage.getItem(STORAGE_KEY);
-      if (rawV2) return migrateData(JSON.parse(rawV2));
-
-      const rawV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (rawV1) {
-        const migrated = migrateData(JSON.parse(rawV1));
-        persistData(migrated);
-        return migrated;
-      }
-      return structuredClone(DEFAULT_DATA);
+      const v3 = localStorage.getItem(STORAGE_KEY);
+      if (v3) return migrateData(JSON.parse(v3));
+      const v2 = localStorage.getItem(LEGACY_V2_KEY);
+      if (v2) { const m = migrateData(JSON.parse(v2)); persistData(m); return m; }
+      const v1 = localStorage.getItem(LEGACY_V1_KEY);
+      if (v1) { const m = migrateData(JSON.parse(v1)); persistData(m); return m; }
+      return freshData();
     } catch {
-      return structuredClone(DEFAULT_DATA);
+      return freshData();
     }
+  }
+
+  function freshData() {
+    const created = new Date().toISOString();
+    return { ...structuredClone(DEFAULT_DATA), meta: { workspaceName: 'My Life OS', createdAt: created, updatedAt: created } };
   }
 
   function persistData(data) {
@@ -856,188 +784,312 @@
   }
 
   function migrateData(input) {
-    if (!input || typeof input !== 'object') return structuredClone(DEFAULT_DATA);
+    if (!input || typeof input !== 'object') return freshData();
+    if (input.version === 3) return sanitizeV3(input);
 
-    if (input.version === 1) {
-      return {
-        version: 2,
-        settings: sanitizeSettings({ ...DEFAULT_DATA.settings, ...(input.settings || {}) }),
-        tasks: Array.isArray(input.tasks) ? input.tasks : [],
-        sessions: Array.isArray(input.sessions) ? input.sessions.map((s) => ({ ...s, note: s.note || undefined })) : [],
-        planner: { days: {} },
-      };
+    const base = freshData();
+    if (input.version === 2 || input.version === 1) {
+      const tasks = Array.isArray(input.tasks) ? input.tasks : [];
+      const goalId = tasks.length ? makeId() : null;
+      if (goalId) base.hierarchy.goals.push({ id: goalId, name: 'Migrated Tasks', archived: false });
+      const taskToProject = new Map();
+      tasks.forEach((t) => {
+        const pid = makeId();
+        taskToProject.set(t.id, pid);
+        base.hierarchy.projects.push({ id: pid, goalId, name: String(t.name || 'Task'), archived: Boolean(t.archived) });
+      });
+      const sessions = Array.isArray(input.sessions) ? input.sessions : [];
+      base.sessions = sessions.map((s) => {
+        const item = {
+          id: s.id || makeId(),
+          sessionType: normalizeMode(s.sessionType || s.mode),
+          startTime: s.startTime || new Date().toISOString(),
+          endTime: s.endTime || new Date().toISOString(),
+          durationSeconds: toValidInt(s.durationSeconds, 0, 0, 100000),
+          completed: Boolean(s.completed)
+        };
+        if (s.taskId && taskToProject.get(s.taskId)) item.context = { goalId, projectId: taskToProject.get(s.taskId), topicId: '' };
+        if (s.note) item.note = String(s.note);
+        if (s.quality && typeof s.quality === 'object') item.quality = { rating: toValidInt(s.quality.rating, 3, 1, 5), distractions: toValidInt(s.quality.distractions, 0, 0, 999), note: String(s.quality.note || '') };
+        return item;
+      });
+
+      const planner = input.planner?.days || {};
+      for (const [k, day] of Object.entries(planner)) {
+        base.daily.days[k] = {
+          timeBlocks: Array.isArray(day.timeBlocks) ? day.timeBlocks.map((b) => ({ id: b.id || makeId(), start: String(b.start || '09:00'), end: String(b.end || '09:30'), title: String(b.title || 'Block'), source: b.source === 'todo' ? 'todo' : 'manual', todoId: b.todoId || null })) : [],
+          dailyTodos: Array.isArray(day.dailyTodos) ? day.dailyTodos.map((t) => ({ id: t.id || makeId(), text: String(t.text || ''), done: Boolean(t.done), scheduled: Boolean(t.scheduled), blockId: t.blockId || null })) : []
+        };
+      }
+      base.settings = sanitizeSettings({ ...base.settings, ...(input.settings || {}) });
+      return base;
     }
-
-    if (input.version === APP_VERSION) {
-      return {
-        version: APP_VERSION,
-        settings: sanitizeSettings({ ...DEFAULT_DATA.settings, ...(input.settings || {}) }),
-        tasks: Array.isArray(input.tasks) ? input.tasks : [],
-        sessions: Array.isArray(input.sessions) ? input.sessions.map((s) => ({ ...s, note: s.note || undefined })) : [],
-        planner: sanitizePlanner(input.planner),
-      };
-    }
-
-    throw new Error(`Unsupported data version: ${input.version}`);
+    return base;
   }
 
-  function validateImport(obj) {
-    const migrated = migrateData(obj);
-    if (!Array.isArray(migrated.tasks) || !Array.isArray(migrated.sessions)) throw new Error('Invalid schema: tasks/sessions must be arrays.');
-    if (!migrated.planner || typeof migrated.planner !== 'object') throw new Error('Invalid schema: planner missing.');
-    return migrated;
-  }
-
-  function mergeData(base, incoming) {
-    const taskMap = new Map(base.tasks.map((t) => [t.id, t]));
-    incoming.tasks.forEach((task) => taskMap.set(task.id, { ...taskMap.get(task.id), ...task }));
-
-    const sessionMap = new Map(base.sessions.map((s) => [s.id, s]));
-    incoming.sessions.forEach((session) => {
-      if (!sessionMap.has(session.id)) sessionMap.set(session.id, session);
-    });
-
-    const days = { ...sanitizePlanner(base.planner).days };
-    for (const [date, incomingDay] of Object.entries(sanitizePlanner(incoming.planner).days)) {
-      const current = days[date] || { notes: '', dailyTodos: [], timeBlocks: [] };
-      const blockMap = new Map(current.timeBlocks.map((b) => [b.id, b]));
-      incomingDay.timeBlocks.forEach((b) => blockMap.set(b.id, { ...blockMap.get(b.id), ...b }));
-
-      const todoMap = new Map(current.dailyTodos.map((t) => [t.id, t]));
-      incomingDay.dailyTodos.forEach((t) => todoMap.set(t.id, { ...todoMap.get(t.id), ...t }));
-
-      days[date] = {
-        notes: incomingDay.notes || current.notes || '',
-        timeBlocks: [...blockMap.values()],
-        dailyTodos: [...todoMap.values()],
-      };
-    }
-
+  function sanitizeV3(data) {
     return {
-      version: APP_VERSION,
-      settings: sanitizeSettings({ ...base.settings, ...incoming.settings }),
-      tasks: [...taskMap.values()],
-      sessions: [...sessionMap.values()].sort((a, b) => new Date(a.startTime) - new Date(b.startTime)),
-      planner: { days },
+      version: 3,
+      meta: {
+        workspaceName: typeof data.meta?.workspaceName === 'string' ? data.meta.workspaceName : 'My Life OS',
+        createdAt: data.meta?.createdAt || new Date().toISOString(),
+        updatedAt: data.meta?.updatedAt || new Date().toISOString()
+      },
+      settings: sanitizeSettings(data.settings || {}),
+      hierarchy: sanitizeHierarchy(data.hierarchy || {}),
+      daily: sanitizeDaily(data.daily || {}),
+      sessions: sanitizeSessions(data.sessions || []),
+      reviews: sanitizeReviews(data.reviews || {})
     };
   }
 
-  function sanitizePlanner(raw) {
-    const days = {};
-    const sourceDays = raw && typeof raw === 'object' && raw.days && typeof raw.days === 'object' ? raw.days : {};
+  function sanitizeSettings(raw) {
+    const start = toValidInt(raw.dayStartHour, 6, 0, 23);
+    const end = toValidInt(raw.dayEndHour, 24, 1, 24);
+    return {
+      theme: ['system', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'system',
+      weekStartsOn: raw.weekStartsOn === 'sunday' ? 'sunday' : 'monday',
+      dayStartHour: Math.min(start, end - 1),
+      dayEndHour: Math.max(end, start + 1),
+      focusMinutes: toValidInt(raw.focusMinutes, 25, 1, 120),
+      shortBreakMinutes: toValidInt(raw.shortBreakMinutes, 5, 1, 60),
+      longBreakMinutes: toValidInt(raw.longBreakMinutes, 15, 1, 120),
+      longBreakInterval: toValidInt(raw.longBreakInterval, 4, 2, 12),
+      autoStartNext: Boolean(raw.autoStartNext),
+      soundEnabled: raw.soundEnabled !== false,
+      endSessionConfirmation: raw.endSessionConfirmation !== false,
+      heatmapMetric: raw.heatmapMetric === 'focus_sessions' ? 'focus_sessions' : 'focus_minutes',
+      dailyFocusTargetMinutes: toValidInt(raw.dailyFocusTargetMinutes, 120, 10, 1000),
+      warnOnUnsavedChanges: raw.warnOnUnsavedChanges !== false
+    };
+  }
 
-    for (const [date, day] of Object.entries(sourceDays)) {
-      days[date] = {
-        notes: typeof day.notes === 'string' ? day.notes : '',
-        dailyTodos: Array.isArray(day.dailyTodos) ? day.dailyTodos.map((t) => ({
-          id: t.id || makeId(),
-          text: String(t.text || ''),
-          done: Boolean(t.done),
-          createdAt: t.createdAt || new Date().toISOString(),
-          scheduled: Boolean(t.scheduled),
-          blockId: t.blockId || null,
-        })) : [],
-        timeBlocks: Array.isArray(day.timeBlocks) ? day.timeBlocks.map((b) => ({
-          id: b.id || makeId(),
-          start: String(b.start || '09:00'),
-          end: String(b.end || '09:30'),
-          title: String(b.title || 'Block'),
-          createdAt: b.createdAt || new Date().toISOString(),
-          source: b.source === 'todo' ? 'todo' : 'manual',
-          todoId: b.todoId || null,
-        })) : [],
+  function sanitizeHierarchy(raw) {
+    return {
+      goals: Array.isArray(raw.goals) ? raw.goals.map((g) => ({ id: g.id || makeId(), name: String(g.name || 'Goal'), archived: Boolean(g.archived) })) : [],
+      projects: Array.isArray(raw.projects) ? raw.projects.map((p) => ({ id: p.id || makeId(), goalId: p.goalId || '', name: String(p.name || 'Project'), archived: Boolean(p.archived) })) : [],
+      topics: Array.isArray(raw.topics) ? raw.topics.map((t) => ({ id: t.id || makeId(), projectId: t.projectId || '', name: String(t.name || 'Topic'), archived: Boolean(t.archived) })) : []
+    };
+  }
+
+  function sanitizeDaily(raw) {
+    const days = {};
+    const source = raw.days && typeof raw.days === 'object' ? raw.days : {};
+    for (const [k, day] of Object.entries(source)) {
+      days[k] = {
+        timeBlocks: Array.isArray(day.timeBlocks) ? day.timeBlocks.map((b) => ({ id: b.id || makeId(), start: String(b.start || '09:00'), end: String(b.end || '09:30'), title: String(b.title || 'Block'), source: b.source === 'todo' ? 'todo' : 'manual', todoId: b.todoId || null })) : [],
+        dailyTodos: Array.isArray(day.dailyTodos) ? day.dailyTodos.map((t) => ({ id: t.id || makeId(), text: String(t.text || ''), done: Boolean(t.done), scheduled: Boolean(t.scheduled), blockId: t.blockId || null })) : []
       };
     }
     return { days };
   }
 
-  function sanitizeSettings(raw) {
-    const start = toValidInt(raw.dayStartHour, DEFAULT_DATA.settings.dayStartHour, 0, 23);
-    const end = toValidInt(raw.dayEndHour, DEFAULT_DATA.settings.dayEndHour, 1, 24);
-    return {
-      focusMinutes: toValidInt(raw.focusMinutes, DEFAULT_DATA.settings.focusMinutes, 1, 120),
-      shortBreakMinutes: toValidInt(raw.shortBreakMinutes, DEFAULT_DATA.settings.shortBreakMinutes, 1, 60),
-      longBreakMinutes: toValidInt(raw.longBreakMinutes, DEFAULT_DATA.settings.longBreakMinutes, 1, 120),
-      longBreakInterval: toValidInt(raw.longBreakInterval, DEFAULT_DATA.settings.longBreakInterval, 2, 12),
-      autoStartNext: Boolean(raw.autoStartNext),
-      soundEnabled: raw.soundEnabled !== false,
-      endSessionConfirmation: raw.endSessionConfirmation !== false,
-      theme: ['system', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'system',
-      archiveCompletedTasks: Boolean(raw.archiveCompletedTasks),
-      warnOnUnsavedExit: raw.warnOnUnsavedExit !== false,
-      dayStartHour: Math.min(start, end - 1),
-      dayEndHour: Math.max(end, start + 1),
-      heatmapMetric: raw.heatmapMetric === 'focus_sessions' ? 'focus_sessions' : 'focus_minutes',
-    };
+  function sanitizeSessions(arr) {
+    return Array.isArray(arr) ? arr.map((s) => {
+      const out = {
+        id: s.id || makeId(),
+        sessionType: normalizeMode(s.sessionType || s.mode),
+        startTime: s.startTime || new Date().toISOString(),
+        endTime: s.endTime || new Date().toISOString(),
+        durationSeconds: toValidInt(s.durationSeconds, 0, 0, 100000),
+        completed: Boolean(s.completed)
+      };
+      if (s.context && typeof s.context === 'object') out.context = { goalId: s.context.goalId || '', projectId: s.context.projectId || '', topicId: s.context.topicId || '' };
+      if (s.note) out.note = String(s.note);
+      if (s.quality) out.quality = { rating: toValidInt(s.quality.rating, 3, 1, 5), distractions: toValidInt(s.quality.distractions, 0, 0, 999), note: String(s.quality.note || '') };
+      return out;
+    }) : [];
   }
 
-  function toValidInt(value, fallback, min, max) {
-    const n = Number.parseInt(String(value), 10);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.min(max, Math.max(min, n));
+  function sanitizeReviews(raw) {
+    const weeks = {};
+    const src = raw.weeks && typeof raw.weeks === 'object' ? raw.weeks : {};
+    for (const [k, v] of Object.entries(src)) weeks[k] = { reflection: String(v.reflection || ''), intention: String(v.intention || ''), updatedAt: v.updatedAt || new Date().toISOString() };
+    return { weeks };
   }
 
-  function computeStats(sessions) {
-    const focusCompleted = sessions.filter((s) => s.sessionType === 'focus' && s.completed);
-    const todayStr = dayKey(new Date());
-    const todayFocus = focusCompleted.filter((s) => dayKey(new Date(s.endTime)) === todayStr);
-
-    const daily = new Map();
-    focusCompleted.forEach((s) => {
-      const key = dayKey(new Date(s.endTime));
-      const current = daily.get(key) || { minutes: 0, sessions: 0 };
-      current.minutes += s.durationSeconds / 60;
-      current.sessions += 1;
-      daily.set(key, current);
-    });
-
-    const last7Days = Array.from({ length: 7 }).map((_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
-      const key = dayKey(d);
-      return { label: d.toLocaleDateString(undefined, { weekday: 'short' }), minutes: Math.round((daily.get(key)?.minutes || 0)), key };
-    });
-
-    const bestDayMinutes = Math.round(Math.max(0, ...[...daily.values()].map((d) => d.minutes)));
-    const totalFocusMinutes = Math.round([...daily.values()].reduce((sum, d) => sum + d.minutes, 0));
-
-    return {
-      todayFocusMinutes: Math.round(todayFocus.reduce((sum, s) => sum + s.durationSeconds / 60, 0)),
-      todayFocusCount: todayFocus.length,
-      streakDays: calculateStreak(daily),
-      last7Days,
-      bestDayMinutes,
-      totalFocusMinutes,
-      daily,
-    };
+  function validateImport(obj) {
+    const m = migrateData(obj);
+    if (m.version !== 3) throw new Error('Unsupported data version');
+    return m;
   }
 
-  function calculateStreak(dailyMap) {
-    let streak = 0;
-    const day = new Date();
-    while (true) {
-      const key = dayKey(day);
-      if ((dailyMap.get(key)?.sessions || 0) > 0) {
-        streak += 1;
-        day.setDate(day.getDate() - 1);
-      } else break;
+  function mergeData(base, incoming) {
+    const out = sanitizeV3(base);
+    const inc = sanitizeV3(incoming);
+    out.meta.updatedAt = new Date().toISOString();
+    out.settings = sanitizeSettings({ ...out.settings, ...inc.settings });
+    const gm = new Map(out.hierarchy.goals.map((x) => [x.id, x])); inc.hierarchy.goals.forEach((g) => gm.set(g.id, g)); out.hierarchy.goals = [...gm.values()];
+    const pm = new Map(out.hierarchy.projects.map((x) => [x.id, x])); inc.hierarchy.projects.forEach((p) => pm.set(p.id, p)); out.hierarchy.projects = [...pm.values()];
+    const tm = new Map(out.hierarchy.topics.map((x) => [x.id, x])); inc.hierarchy.topics.forEach((t) => tm.set(t.id, t)); out.hierarchy.topics = [...tm.values()];
+    const sm = new Map(out.sessions.map((x) => [x.id, x])); inc.sessions.forEach((s) => { if (!sm.has(s.id)) sm.set(s.id, s); }); out.sessions = [...sm.values()].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    const days = { ...out.daily.days };
+    for (const [k, d] of Object.entries(inc.daily.days)) {
+      const cur = days[k] || { timeBlocks: [], dailyTodos: [] };
+      const bm = new Map(cur.timeBlocks.map((b) => [b.id, b])); d.timeBlocks.forEach((b) => bm.set(b.id, b));
+      const dm = new Map(cur.dailyTodos.map((t) => [t.id, t])); d.dailyTodos.forEach((t) => dm.set(t.id, t));
+      days[k] = { timeBlocks: [...bm.values()], dailyTodos: [...dm.values()] };
     }
-    return streak;
+    out.daily.days = days;
+    out.reviews.weeks = { ...out.reviews.weeks, ...inc.reviews.weeks };
+    return out;
   }
 
-  function playBeep() {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 880;
-    gain.gain.value = 0.0001;
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
-    osc.stop(ctx.currentTime + 0.26);
+  function getDay(dateKey) {
+    if (!state.data.daily.days[dateKey]) state.data.daily.days[dateKey] = { timeBlocks: [], dailyTodos: [] };
+    return state.data.daily.days[dateKey];
+  }
+
+  function validateBlock(start, end) {
+    const s = timeToMinutes(start), e = timeToMinutes(end);
+    if (s < 0 || e < 0 || e <= s) return false;
+    return s >= state.data.settings.dayStartHour * 60 && e <= state.data.settings.dayEndHour * 60;
+  }
+
+  function timeToMinutes(hhmm) {
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm || '');
+    if (!m) return -1;
+    return Number(m[1]) * 60 + Number(m[2]);
+  }
+
+  async function initializeWorkspaceManager() {
+    const meta = loadWorkspaceMeta();
+    state.workspace.lastSavedAt = meta.lastSavedAt || null;
+    state.workspace.lastSavedFilename = meta.lastSavedFilename || null;
+    state.workspace.name = meta.workspaceName || 'Local only';
+    state.workspace.usingFileHandle = Boolean(meta.usingFileHandle);
+    if (hasFileSystemAccess()) {
+      const handle = await restoreWorkspaceHandle();
+      if (handle) { state.workspace.handle = handle; state.workspace.canOpenLastWorkspace = true; state.workspace.usingFileHandle = true; }
+    }
+    renderWorkspaceStatus();
+  }
+
+  function hasFileSystemAccess() { return typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function'; }
+
+  function loadWorkspaceMeta() { try { return JSON.parse(localStorage.getItem(WORKSPACE_META_KEY) || '{}'); } catch { return {}; } }
+  function saveWorkspaceMeta(meta) {
+    localStorage.setItem(WORKSPACE_META_KEY, JSON.stringify({ workspaceName: state.workspace.name, usingFileHandle: state.workspace.usingFileHandle, lastSavedAt: state.workspace.lastSavedAt, lastSavedFilename: state.workspace.lastSavedFilename, ...meta }));
+  }
+  function markDirty() { state.workspace.dirty = true; renderWorkspaceStatus(); }
+  function clearDirty() { state.workspace.dirty = false; state.workspace.lastSavedAt = new Date().toISOString(); saveWorkspaceMeta(); renderWorkspaceStatus(); }
+
+  function renderWorkspaceStatus() {
+    if (!els['workspace-name']) return;
+    els['workspace-name'].textContent = state.workspace.name || 'Local only';
+    els['workspace-dirty'].textContent = state.workspace.dirty ? 'Unsaved changes' : 'Saved';
+    els['workspace-dirty'].className = state.workspace.dirty ? 'workspace-dirty' : 'workspace-saved';
+    els['workspace-last-saved'].textContent = state.workspace.lastSavedAt || state.workspace.lastSavedFilename ? `Last saved: ${state.workspace.lastSavedAt ? new Date(state.workspace.lastSavedAt).toLocaleString() : '—'} (${state.workspace.lastSavedFilename || state.workspace.name})` : 'No workspace file saved yet.';
+    els['workspace-open-last-btn'].hidden = !state.workspace.canOpenLastWorkspace;
+  }
+
+  async function openWorkspaceFlow() {
+    try {
+      if (hasFileSystemAccess()) {
+        const [handle] = await window.showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }], multiple: false });
+        if (handle) await loadWorkspaceFromHandle(handle);
+      } else {
+        state.ui.pendingFilePurpose = 'workspace';
+        els['import-file-input'].click();
+      }
+    } catch (err) { if (err.name !== 'AbortError') setMessage(`Open workspace failed: ${err.message || err}`, true); }
+  }
+
+  async function openLastWorkspace() {
+    if (!state.workspace.handle) state.workspace.handle = await restoreWorkspaceHandle();
+    if (!state.workspace.handle) return setMessage('No previously authorized workspace found.', true);
+    await loadWorkspaceFromHandle(state.workspace.handle);
+  }
+
+  async function loadWorkspaceFromHandle(handle) {
+    const file = await handle.getFile();
+    state.data = validateImport(JSON.parse(await file.text()));
+    persistData(state.data);
+    initializeTimer();
+    state.workspace.handle = handle;
+    state.workspace.usingFileHandle = true;
+    state.workspace.name = file.name || 'Workspace JSON';
+    state.workspace.lastSavedFilename = state.workspace.name;
+    state.workspace.canOpenLastWorkspace = true;
+    await persistWorkspaceHandle(handle);
+    clearDirty();
+    render();
+    setMessage(`Workspace loaded: ${state.workspace.name}`);
+  }
+
+  async function saveWorkspace(forceSaveAs) {
+    try {
+      if (hasFileSystemAccess()) {
+        if (forceSaveAs || !state.workspace.handle) {
+          state.workspace.handle = await window.showSaveFilePicker({ suggestedName: suggestedWorkspaceFilename(), types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+          state.workspace.usingFileHandle = true;
+          state.workspace.canOpenLastWorkspace = true;
+          await persistWorkspaceHandle(state.workspace.handle);
+        }
+        if (state.workspace.handle) {
+          const writable = await state.workspace.handle.createWritable();
+          await writable.write(JSON.stringify(state.data, null, 2));
+          await writable.close();
+          state.workspace.name = state.workspace.handle.name || state.workspace.name;
+          state.workspace.lastSavedFilename = state.workspace.name;
+          clearDirty();
+          setMessage(`Workspace saved: ${state.workspace.name}`);
+          return;
+        }
+      }
+      const filename = suggestedWorkspaceFilename();
+      downloadJson(filename);
+      state.workspace.name = 'Local only';
+      state.workspace.usingFileHandle = false;
+      state.workspace.lastSavedFilename = filename;
+      clearDirty();
+      setMessage(`Workspace downloaded: ${filename}`);
+    } catch (err) {
+      if (err.name !== 'AbortError') setMessage(`Save workspace failed: ${err.message || err}`, true);
+    }
+  }
+
+  function suggestedWorkspaceFilename() { return `localpomodoro_workspace_${new Date().toISOString().slice(0, 10)}.json`; }
+  function downloadJson(filename) {
+    const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  async function persistWorkspaceHandle(handle) {
+    saveWorkspaceMeta();
+    try { const db = await openWorkspaceDb(); await dbPut(db, WORKSPACE_HANDLE_ID, handle); } catch {}
+  }
+  async function restoreWorkspaceHandle() {
+    try { const db = await openWorkspaceDb(); return await dbGet(db, WORKSPACE_HANDLE_ID); } catch { return null; }
+  }
+  function openWorkspaceDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(WORKSPACE_HANDLE_DB, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(WORKSPACE_HANDLE_STORE);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+    });
+  }
+  function dbPut(db, key, value) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(WORKSPACE_HANDLE_STORE, 'readwrite');
+      tx.objectStore(WORKSPACE_HANDLE_STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  function dbGet(db, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(WORKSPACE_HANDLE_STORE, 'readonly');
+      const req = tx.objectStore(WORKSPACE_HANDLE_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function onBeforeUnload(e) {
+    if (state.workspace.dirty && state.data.settings.warnOnUnsavedChanges !== false) { e.preventDefault(); e.returnValue = ''; }
   }
 
   function requestNotificationPermissionIfNeeded() {
@@ -1290,48 +1342,58 @@
   function setMessage(message, isError = false) {
     state.ui.message = message;
     els['status-message'].style.color = isError ? 'var(--danger)' : 'var(--muted)';
-    els['status-message'].textContent = state.ui.message;
+    els['status-message'].textContent = message;
   }
 
-  function debounce(fn, ms) {
-    let t;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
+  function currentContextOrNull() {
+    const c = state.ui.activeContext;
+    if (!c.goalId && !c.projectId && !c.topicId) return null;
+    return { goalId: c.goalId || '', projectId: c.projectId || '', topicId: c.topicId || '' };
   }
 
-  function formatSeconds(total) {
-    const mm = String(Math.floor(total / 60)).padStart(2, '0');
-    const ss = String(total % 60).padStart(2, '0');
-    return `${mm}:${ss}`;
+  function contextLabel(context) {
+    if (!context) return 'No context';
+    const g = state.data.hierarchy.goals.find((x) => x.id === context.goalId)?.name || '';
+    const p = state.data.hierarchy.projects.find((x) => x.id === context.projectId)?.name || '';
+    const t = state.data.hierarchy.topics.find((x) => x.id === context.topicId)?.name || '';
+    return [g, p, t].filter(Boolean).join(' / ') || 'No context';
   }
 
-  function dayKey(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+  function optionHtml(label, list, selected) {
+    return [`<option value="">${escapeHtml(label)}</option>`, ...list.map((x) => `<option value="${x.id}" ${x.id === selected ? 'selected' : ''}>${escapeHtml(x.name)}</option>`)].join('');
   }
 
-  function formatDateTime(iso) {
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? 'Invalid date' : d.toLocaleString();
+  function toValidInt(value, fallback, min, max) {
+    const n = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
   }
 
-  function humanMode(mode) {
-    return mode === 'focus' ? 'Focus' : mode === 'short_break' ? 'Short Break' : 'Long Break';
+  function normalizeMode(mode) { return mode === 'focus' ? 'focus' : mode === 'short_break' ? 'short_break' : 'long_break'; }
+  function humanMode(mode) { return mode === 'focus' ? 'Focus' : mode === 'short_break' ? 'Short Break' : 'Long Break'; }
+  function formatSeconds(total) { const mm = String(Math.floor(total / 60)).padStart(2, '0'); const ss = String(total % 60).padStart(2, '0'); return `${mm}:${ss}`; }
+  function dayKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+  function makeId() { return (crypto.randomUUID && crypto.randomUUID()) || `id_${Date.now()}_${Math.random().toString(16).slice(2)}`; }
+  function escapeHtml(str) { return String(str).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+  function $(s) { return document.querySelector(s); }
+  function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
+
+  function playBeep() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = 880; gain.gain.value = 0.0001;
+    osc.connect(gain); gain.connect(ctx.destination); osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
+    osc.stop(ctx.currentTime + 0.26);
   }
 
-  function normalizeMode(mode) {
-    return mode === 'focus' ? 'focus' : mode === 'short_break' ? 'short_break' : 'long_break';
-  }
-
-  function makeId() {
-    return (crypto.randomUUID && crypto.randomUUID()) || `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  }
-
-  function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  function isoWeekKey(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
   }
 })();

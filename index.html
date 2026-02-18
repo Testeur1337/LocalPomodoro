@@ -23,35 +23,19 @@
         </div>
 
         <div class="controls">
-          <button id="start-btn" class="btn primary" aria-label="Start timer">Start</button>
-          <button id="pause-btn" class="btn" aria-label="Pause timer" disabled>Pause</button>
-          <button id="resume-btn" class="btn" aria-label="Resume timer" disabled>Resume</button>
-          <button id="skip-btn" class="btn" aria-label="Skip current session">Skip</button>
-          <button id="reset-btn" class="btn danger" aria-label="Reset current session">Reset</button>
+          <button id="start-btn" class="btn primary">Start</button>
+          <button id="pause-btn" class="btn" disabled>Pause</button>
+          <button id="resume-btn" class="btn" disabled>Resume</button>
+          <button id="skip-btn" class="btn">Skip</button>
+          <button id="reset-btn" class="btn danger">Reset</button>
         </div>
 
         <div class="inline-info">
-          <label class="switch-row" for="active-task-select">
-            Active task
-            <select id="active-task-select" aria-label="Select active task"></select>
-          </label>
-          <label class="switch-row">
-            <input id="auto-start-toggle" type="checkbox" />
-            Auto-start next session
-          </label>
+          <label class="switch-row">Goal <select id="active-goal-select"></select></label>
+          <label class="switch-row">Project <select id="active-project-select"></select></label>
+          <label class="switch-row">Topic <select id="active-topic-select"></select></label>
+          <label class="switch-row"><input id="auto-start-toggle" type="checkbox" /> Auto-start next session</label>
         </div>
-      </section>
-
-      <section id="tasks-panel" class="panel" aria-labelledby="tab-tasks" hidden>
-        <form id="add-task-form" class="row" autocomplete="off">
-          <input id="new-task-input" type="text" maxlength="120" placeholder="Add a task" aria-label="Task name" required />
-          <button class="btn primary" type="submit" aria-label="Add task">Add</button>
-        </form>
-        <label class="switch-row">
-          <input id="archive-toggle" type="checkbox" />
-          Hide archived tasks
-        </label>
-        <ul id="task-list" class="task-list" aria-label="Task list"></ul>
       </section>
 
       <section id="planner-panel" class="panel" aria-labelledby="tab-planner" hidden>
@@ -62,7 +46,7 @@
 
         <div class="planner-layout">
           <div id="planner-hours" class="planner-hours"></div>
-          <div id="planner-timeline" class="planner-timeline" aria-label="Daily timeline"></div>
+          <div id="planner-timeline" class="planner-timeline"></div>
         </div>
 
         <h4>Time Block</h4>
@@ -70,60 +54,66 @@
           <input id="block-id" type="hidden" />
           <label>Start <input id="block-start" type="time" required /></label>
           <label>End <input id="block-end" type="time" required /></label>
-          <input id="block-title" type="text" maxlength="140" placeholder="Block title" required aria-label="Block title" />
+          <input id="block-title" type="text" maxlength="140" placeholder="Block title" required />
           <button class="btn primary" type="submit">Save block</button>
           <button id="block-cancel-btn" class="btn" type="button">Cancel edit</button>
         </form>
 
         <h4>Daily Todos</h4>
         <form id="todo-form" class="row" autocomplete="off">
-          <input id="todo-input" type="text" maxlength="140" placeholder="Add daily todo" required aria-label="Daily todo" />
+          <input id="todo-input" type="text" maxlength="140" placeholder="Add daily todo" required />
           <button class="btn primary" type="submit">Add</button>
         </form>
-        <ul id="todo-list" class="task-list" aria-label="Daily todos"></ul>
+        <ul id="todo-list" class="task-list"></ul>
+      </section>
+
+      <section id="hierarchy-panel" class="panel" aria-labelledby="tab-hierarchy" hidden>
+        <h3>Goals</h3>
+        <form id="goal-form" class="row" autocomplete="off">
+          <input id="goal-input" type="text" maxlength="120" placeholder="Add a goal" required />
+          <button class="btn primary" type="submit">Add Goal</button>
+        </form>
+        <ul id="goal-list" class="task-list"></ul>
+
+        <h3>Projects</h3>
+        <form id="project-form" class="row wrap" autocomplete="off">
+          <select id="project-goal-select"></select>
+          <input id="project-input" type="text" maxlength="120" placeholder="Add a project" required />
+          <button class="btn primary" type="submit">Add Project</button>
+        </form>
+        <ul id="project-list" class="task-list"></ul>
+
+        <h3>Topics</h3>
+        <form id="topic-form" class="row wrap" autocomplete="off">
+          <select id="topic-project-select"></select>
+          <input id="topic-input" type="text" maxlength="120" placeholder="Add a topic" required />
+          <button class="btn primary" type="submit">Add Topic</button>
+        </form>
+        <ul id="topic-list" class="task-list"></ul>
       </section>
 
       <section id="stats-panel" class="panel" aria-labelledby="tab-stats" hidden>
         <div class="stats-grid">
           <article class="card"><h3>Today Focus (min)</h3><p id="today-focus-minutes">0</p></article>
           <article class="card"><h3>Completed Focus Today</h3><p id="today-focus-count">0</p></article>
-          <article class="card"><h3>Streak (days)</h3><p id="streak-days">0</p></article>
-          <article class="card"><h3>Best Day (min)</h3><p id="best-day">0</p></article>
+          <article class="card"><h3>Current Streak (days)</h3><p id="streak-days">0</p></article>
+          <article class="card"><h3>Longest Streak (days)</h3><p id="longest-streak-days">0</p></article>
           <article class="card"><h3>Total Focus (hours)</h3><p id="total-focus-hours">0</p></article>
         </div>
 
-        <h3>Last 7 Days</h3>
-        <div id="week-chart" class="week-chart" aria-label="Weekly focus chart"></div>
-
         <h3>Last 365 Days Heatmap</h3>
-        <div id="heatmap-grid" class="heatmap-grid" aria-label="Year heatmap"></div>
+        <div id="heatmap-grid" class="heatmap-grid"></div>
         <div id="heatmap-detail" class="card" hidden></div>
 
-        <div class="row space-between">
-          <h3>Recent Sessions</h3>
-          <label>
-            Filter
-            <select id="history-filter" aria-label="Session history filter">
-              <option value="all">All</option>
-              <option value="focus">Focus only</option>
-            </select>
-          </label>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Start</th>
-                <th>End</th>
-                <th>Minutes</th>
-                <th>Completed</th>
-                <th>Task</th>
-              </tr>
-            </thead>
-            <tbody id="history-body"></tbody>
-          </table>
-        </div>
+        <h3>Weekly Summary</h3>
+        <div id="weekly-summary" class="card"></div>
+
+        <h3>Weekly Review</h3>
+        <form id="weekly-review-form" class="row wrap" autocomplete="off">
+          <textarea id="weekly-reflection" rows="3" placeholder="What went well?"></textarea>
+          <textarea id="weekly-intention" rows="3" placeholder="What will you improve next week?"></textarea>
+          <button class="btn primary" type="submit">Save weekly review</button>
+        </form>
       </section>
 
       <section id="settings-panel" class="panel" aria-labelledby="tab-settings" hidden>
@@ -133,12 +123,13 @@
           <label>Short break (minutes) <input id="short-break-minutes" type="number" min="1" max="60" /></label>
           <label>Long break (minutes) <input id="long-break-minutes" type="number" min="1" max="120" /></label>
           <label>Long break after N focus <input id="long-break-interval" type="number" min="2" max="12" /></label>
+          <label>Daily focus target (minutes) <input id="daily-focus-target-minutes" type="number" min="10" max="1000" /></label>
         </div>
 
         <h3>Behavior</h3>
         <label class="switch-row"><input id="sound-toggle" type="checkbox" /> Sound enabled</label>
         <label class="switch-row"><input id="confirm-toggle" type="checkbox" /> End-session confirmation</label>
-        <label class="switch-row"><input id="warn-unsaved-toggle" type="checkbox" /> Warn before closing with unsaved workspace changes</label>
+        <label class="switch-row"><input id="warn-unsaved-toggle" type="checkbox" /> Warn before closing with unsaved changes</label>
 
         <h3>Planner & Stats</h3>
         <div class="settings-grid">
@@ -176,12 +167,25 @@
         <input id="import-file-input" type="file" accept="application/json" hidden />
       </section>
 
+      <dialog id="reflection-dialog">
+        <form id="reflection-form" method="dialog" class="reflection-form">
+          <h3>Focus Reflection</h3>
+          <label>Rating (1-5) <input id="reflection-rating" type="number" min="1" max="5" required /></label>
+          <label>Distractions <input id="reflection-distractions" type="number" min="0" max="999" required /></label>
+          <label>Note <textarea id="reflection-note" rows="3" maxlength="240"></textarea></label>
+          <div class="controls">
+            <button class="btn" value="cancel">Skip</button>
+            <button class="btn primary" value="default">Save reflection</button>
+          </div>
+        </form>
+      </dialog>
+
       <nav class="tabbar" aria-label="Primary">
-        <button id="tab-timer" class="tab active" data-tab="timer" aria-label="Open timer tab">Timer</button>
-        <button id="tab-tasks" class="tab" data-tab="tasks" aria-label="Open tasks tab">Tasks</button>
-        <button id="tab-planner" class="tab" data-tab="planner" aria-label="Open planner tab">Planner</button>
-        <button id="tab-stats" class="tab" data-tab="stats" aria-label="Open stats tab">Stats</button>
-        <button id="tab-settings" class="tab" data-tab="settings" aria-label="Open settings tab">Settings</button>
+        <button id="tab-timer" class="tab active" data-tab="timer">Timer</button>
+        <button id="tab-planner" class="tab" data-tab="planner">Planner</button>
+        <button id="tab-hierarchy" class="tab" data-tab="hierarchy">Hierarchy</button>
+        <button id="tab-stats" class="tab" data-tab="stats">Stats</button>
+        <button id="tab-settings" class="tab" data-tab="settings">Settings</button>
       </nav>
 
       <p id="status-message" class="status" role="status"></p>
