@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyPomodoro</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app" aria-live="polite">
+      <header class="app-header">
+        <h1>MyPomodoro</h1>
+        <button id="theme-toggle" class="icon-btn" aria-label="Toggle light and dark theme">🌓</button>
+      </header>
+
+      <section id="timer-panel" class="panel active" aria-labelledby="tab-timer">
+        <p id="mode-label" class="mode-label">Focus</p>
+        <div class="timer-display-wrap">
+          <p id="timer-display" class="timer-display">25:00</p>
+          <div class="progress-track" role="progressbar" aria-label="Session progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="start-btn" class="btn primary" aria-label="Start timer">Start</button>
+          <button id="pause-btn" class="btn" aria-label="Pause timer" disabled>Pause</button>
+          <button id="resume-btn" class="btn" aria-label="Resume timer" disabled>Resume</button>
+          <button id="skip-btn" class="btn" aria-label="Skip current session">Skip</button>
+          <button id="reset-btn" class="btn danger" aria-label="Reset current session">Reset</button>
+        </div>
+
+        <div class="inline-info">
+          <label class="switch-row" for="active-task-select">
+            Active task
+            <select id="active-task-select" aria-label="Select active task"></select>
+          </label>
+          <label class="switch-row">
+            <input id="auto-start-toggle" type="checkbox" />
+            Auto-start next session
+          </label>
+        </div>
+      </section>
+
+      <section id="tasks-panel" class="panel" aria-labelledby="tab-tasks" hidden>
+        <form id="add-task-form" class="row" autocomplete="off">
+          <input id="new-task-input" type="text" maxlength="120" placeholder="Add a task" aria-label="Task name" required />
+          <button class="btn primary" type="submit" aria-label="Add task">Add</button>
+        </form>
+        <label class="switch-row">
+          <input id="archive-toggle" type="checkbox" />
+          Hide archived tasks
+        </label>
+        <ul id="task-list" class="task-list" aria-label="Task list"></ul>
+      </section>
+
+      <section id="planner-panel" class="panel" aria-labelledby="tab-planner" hidden>
+        <div class="row space-between wrap">
+          <h3>Daily Planner</h3>
+          <label>Date <input id="planner-date" type="date" /></label>
+        </div>
+
+        <div class="planner-layout">
+          <div id="planner-hours" class="planner-hours"></div>
+          <div id="planner-timeline" class="planner-timeline" aria-label="Daily timeline"></div>
+        </div>
+
+        <h4>Time Block</h4>
+        <form id="block-form" class="row wrap" autocomplete="off">
+          <input id="block-id" type="hidden" />
+          <label>Start <input id="block-start" type="time" required /></label>
+          <label>End <input id="block-end" type="time" required /></label>
+          <input id="block-title" type="text" maxlength="140" placeholder="Block title" required aria-label="Block title" />
+          <button class="btn primary" type="submit">Save block</button>
+          <button id="block-cancel-btn" class="btn" type="button">Cancel edit</button>
+        </form>
+
+        <h4>Daily Todos</h4>
+        <form id="todo-form" class="row" autocomplete="off">
+          <input id="todo-input" type="text" maxlength="140" placeholder="Add daily todo" required aria-label="Daily todo" />
+          <button class="btn primary" type="submit">Add</button>
+        </form>
+        <ul id="todo-list" class="task-list" aria-label="Daily todos"></ul>
+      </section>
+
+      <section id="stats-panel" class="panel" aria-labelledby="tab-stats" hidden>
+        <div class="stats-grid">
+          <article class="card"><h3>Today Focus (min)</h3><p id="today-focus-minutes">0</p></article>
+          <article class="card"><h3>Completed Focus Today</h3><p id="today-focus-count">0</p></article>
+          <article class="card"><h3>Streak (days)</h3><p id="streak-days">0</p></article>
+          <article class="card"><h3>Best Day (min)</h3><p id="best-day">0</p></article>
+          <article class="card"><h3>Total Focus (hours)</h3><p id="total-focus-hours">0</p></article>
+        </div>
+
+        <h3>Last 7 Days</h3>
+        <div id="week-chart" class="week-chart" aria-label="Weekly focus chart"></div>
+
+        <h3>Last 365 Days Heatmap</h3>
+        <div id="heatmap-grid" class="heatmap-grid" aria-label="Year heatmap"></div>
+        <div id="heatmap-detail" class="card" hidden></div>
+
+        <div class="row space-between">
+          <h3>Recent Sessions</h3>
+          <label>
+            Filter
+            <select id="history-filter" aria-label="Session history filter">
+              <option value="all">All</option>
+              <option value="focus">Focus only</option>
+            </select>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Minutes</th>
+                <th>Completed</th>
+                <th>Task</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="settings-panel" class="panel" aria-labelledby="tab-settings" hidden>
+        <h3>Durations</h3>
+        <div class="settings-grid">
+          <label>Focus (minutes) <input id="focus-minutes" type="number" min="1" max="120" /></label>
+          <label>Short break (minutes) <input id="short-break-minutes" type="number" min="1" max="60" /></label>
+          <label>Long break (minutes) <input id="long-break-minutes" type="number" min="1" max="120" /></label>
+          <label>Long break after N focus <input id="long-break-interval" type="number" min="2" max="12" /></label>
+        </div>
+
+        <h3>Behavior</h3>
+        <label class="switch-row"><input id="sound-toggle" type="checkbox" /> Sound enabled</label>
+        <label class="switch-row"><input id="confirm-toggle" type="checkbox" /> End-session confirmation</label>
+
+        <h3>Planner & Stats</h3>
+        <div class="settings-grid">
+          <label>Day start hour <input id="day-start-hour" type="number" min="0" max="23" /></label>
+          <label>Day end hour <input id="day-end-hour" type="number" min="1" max="24" /></label>
+          <label>Heatmap metric
+            <select id="heatmap-metric">
+              <option value="focus_minutes">Focus minutes</option>
+              <option value="focus_sessions">Focus sessions</option>
+            </select>
+          </label>
+        </div>
+
+        <h3>Data Management</h3>
+        <div class="controls">
+          <button id="export-btn" class="btn">Export data</button>
+          <button id="import-btn" class="btn">Import data</button>
+          <button id="copy-btn" class="btn">Copy to clipboard</button>
+          <button id="paste-btn" class="btn">Paste from clipboard</button>
+          <button id="reset-all-btn" class="btn danger">Reset all data</button>
+        </div>
+        <input id="import-file-input" type="file" accept="application/json" hidden />
+      </section>
+
+      <nav class="tabbar" aria-label="Primary">
+        <button id="tab-timer" class="tab active" data-tab="timer" aria-label="Open timer tab">Timer</button>
+        <button id="tab-tasks" class="tab" data-tab="tasks" aria-label="Open tasks tab">Tasks</button>
+        <button id="tab-planner" class="tab" data-tab="planner" aria-label="Open planner tab">Planner</button>
+        <button id="tab-stats" class="tab" data-tab="stats" aria-label="Open stats tab">Stats</button>
+        <button id="tab-settings" class="tab" data-tab="settings" aria-label="Open settings tab">Settings</button>
+      </nav>
+
+      <p id="status-message" class="status" role="status"></p>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
