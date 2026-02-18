@@ -169,3 +169,56 @@ MyPomodoro is a Goodtime-like Pomodoro app that runs fully offline by opening `i
 ### Clipboard
 - **Copy to clipboard** copies full v2 JSON.
 - **Paste from clipboard** uses same validation/migration/import flow as file import.
+
+## Workspace JSON mode
+
+The app now supports a **Workspace JSON** workflow in addition to localStorage fallback.
+
+### What it does
+
+- Open one JSON workspace that contains full app data (`settings`, `tasks`, `sessions`, planner days, and future fields supported by schema migration).
+- Save current in-memory state back to a workspace file.
+- Track workspace status in **Settings → Workspace**:
+  - current workspace name,
+  - saved/unsaved indicator,
+  - last saved timestamp.
+
+### Open workspace
+
+Use **Open workspace JSON** in Settings:
+
+- On Chrome/Edge with File System Access API:
+  - uses `showOpenFilePicker`,
+  - reads via `handle.getFile().text()`.
+- Fallback browsers:
+  - uses regular file input (`<input type="file">`) and reads the selected JSON.
+
+When loaded, workspace data replaces current state (replace behavior) and is also persisted to localStorage immediately.
+
+### Save workspace
+
+- **Save workspace**:
+  - if File System Access handle exists: writes back to same file via `createWritable()`.
+  - otherwise: downloads JSON fallback filename `localpomodoro_workspace_YYYY-MM-DD.json`.
+- **Save As…**:
+  - File System Access API: prompts with `showSaveFilePicker`.
+  - fallback: download JSON.
+
+### Startup behavior and last workspace
+
+- The app stores workspace metadata in localStorage.
+- If available, it also attempts to store the file handle in IndexedDB.
+- On startup it restores handle availability and shows **Open last workspace** when possible.
+- Browser security still applies: no guaranteed silent open/write without prior user permission.
+
+### localStorage fallback vs workspace file
+
+- localStorage remains active for offline resilience and backwards compatibility.
+- Workspace file is an explicit user-controlled source of truth for file-based workflows.
+- If file permissions are unavailable, download/export still works and the app remains fully offline.
+
+### Unsaved changes warning
+
+- Workspace dirty flag turns on after data changes.
+- Dirty flag clears on successful workspace save.
+- `beforeunload` warning appears when unsaved changes exist (toggle in Behavior settings).

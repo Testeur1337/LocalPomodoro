@@ -138,6 +138,7 @@
         <h3>Behavior</h3>
         <label class="switch-row"><input id="sound-toggle" type="checkbox" /> Sound enabled</label>
         <label class="switch-row"><input id="confirm-toggle" type="checkbox" /> End-session confirmation</label>
+        <label class="switch-row"><input id="warn-unsaved-toggle" type="checkbox" /> Warn before closing with unsaved workspace changes</label>
 
         <h3>Planner & Stats</h3>
         <div class="settings-grid">
@@ -149,6 +150,19 @@
               <option value="focus_sessions">Focus sessions</option>
             </select>
           </label>
+        </div>
+
+        <h3>Workspace</h3>
+        <div class="workspace-box">
+          <p><strong>Current:</strong> <span id="workspace-name">Local only</span></p>
+          <p><strong>Status:</strong> <span id="workspace-dirty">Saved</span></p>
+          <p id="workspace-last-saved" class="muted"></p>
+          <div class="controls">
+            <button id="workspace-open-btn" class="btn">Open workspace JSON</button>
+            <button id="workspace-open-last-btn" class="btn" hidden>Open last workspace</button>
+            <button id="workspace-save-btn" class="btn primary">Save workspace</button>
+            <button id="workspace-save-as-btn" class="btn">Save As…</button>
+          </div>
         </div>
 
         <h3>Data Management</h3>
