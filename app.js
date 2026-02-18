@@ -1,8 +1,9 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'mypomodoro_data_v1';
-  const APP_VERSION = 1;
+  const STORAGE_KEY = 'mypomodoro_data_v2';
+  const LEGACY_STORAGE_KEY = 'mypomodoro_data_v1';
+  const APP_VERSION = 2;
 
   const DEFAULT_DATA = {
     version: APP_VERSION,
@@ -16,9 +17,13 @@
       endSessionConfirmation: true,
       theme: 'system',
       archiveCompletedTasks: false,
+      dayStartHour: 6,
+      dayEndHour: 24,
+      heatmapMetric: 'focus_minutes',
     },
     tasks: [],
     sessions: [],
+    planner: { days: {} },
   };
 
   const state = {
@@ -27,6 +32,9 @@
       activeTab: 'timer',
       historyFilter: 'all',
       message: '',
+      plannerDate: dayKey(new Date()),
+      selectedHeatmapDay: null,
+      pendingSessionNote: null,
     },
     timer: {
       mode: 'focus',
@@ -56,12 +64,20 @@
   }
 
   function cacheElements() {
-    ['mode-label','timer-display','progress-fill','start-btn','pause-btn','resume-btn','skip-btn','reset-btn','active-task-select','auto-start-toggle','add-task-form','new-task-input','archive-toggle','task-list','today-focus-minutes','today-focus-count','streak-days','best-day','total-focus-hours','week-chart','history-filter','history-body','focus-minutes','short-break-minutes','long-break-minutes','long-break-interval','sound-toggle','confirm-toggle','export-btn','import-btn','copy-btn','paste-btn','reset-all-btn','import-file-input','status-message','theme-toggle']
-      .forEach((id) => (els[id] = document.getElementById(id)));
+    [
+      'mode-label', 'timer-display', 'progress-fill', 'start-btn', 'pause-btn', 'resume-btn', 'skip-btn', 'reset-btn', 'active-task-select', 'auto-start-toggle',
+      'add-task-form', 'new-task-input', 'archive-toggle', 'task-list', 'today-focus-minutes', 'today-focus-count', 'streak-days', 'best-day', 'total-focus-hours',
+      'week-chart', 'history-filter', 'history-body', 'focus-minutes', 'short-break-minutes', 'long-break-minutes', 'long-break-interval', 'sound-toggle', 'confirm-toggle',
+      'export-btn', 'import-btn', 'copy-btn', 'paste-btn', 'reset-all-btn', 'import-file-input', 'status-message', 'theme-toggle', 'planner-date', 'planner-hours', 'planner-timeline',
+      'block-form', 'block-id', 'block-start', 'block-end', 'block-title', 'block-cancel-btn', 'todo-form', 'todo-input', 'todo-list', 'heatmap-grid', 'heatmap-detail',
+      'day-start-hour', 'day-end-hour', 'heatmap-metric'
+    ].forEach((id) => (els[id] = document.getElementById(id)));
+
     els.tabs = Array.from(document.querySelectorAll('.tab'));
     els.panels = {
       timer: document.getElementById('timer-panel'),
       tasks: document.getElementById('tasks-panel'),
+      planner: document.getElementById('planner-panel'),
       stats: document.getElementById('stats-panel'),
       settings: document.getElementById('settings-panel'),
     };
@@ -81,23 +97,29 @@
       render();
     });
 
-    els.tabs.forEach((tab) => tab.addEventListener('click', () => { state.ui.activeTab = tab.dataset.tab; render(); }));
+    els.tabs.forEach((tab) => tab.addEventListener('click', () => {
+      state.ui.activeTab = tab.dataset.tab;
+      render();
+    }));
 
     els['auto-start-toggle'].addEventListener('change', (e) => updateSetting('autoStartNext', e.target.checked));
     els['archive-toggle'].addEventListener('change', (e) => updateSetting('archiveCompletedTasks', e.target.checked));
     els['sound-toggle'].addEventListener('change', (e) => updateSetting('soundEnabled', e.target.checked));
     els['confirm-toggle'].addEventListener('change', (e) => updateSetting('endSessionConfirmation', e.target.checked));
     els['history-filter'].addEventListener('change', (e) => { state.ui.historyFilter = e.target.value; render(); });
+    els['heatmap-metric'].addEventListener('change', (e) => updateSetting('heatmapMetric', e.target.value));
 
-    [['focus-minutes','focusMinutes'],['short-break-minutes','shortBreakMinutes'],['long-break-minutes','longBreakMinutes'],['long-break-interval','longBreakInterval']]
+    [['focus-minutes', 'focusMinutes'], ['short-break-minutes', 'shortBreakMinutes'], ['long-break-minutes', 'longBreakMinutes'], ['long-break-interval', 'longBreakInterval']]
       .forEach(([id, key]) => {
         els[id].addEventListener('change', (e) => {
-          const value = Math.max(1, Number(e.target.value || 1));
-          updateSetting(key, value);
+          updateSetting(key, Number(e.target.value));
           initializeTimer();
           render();
         });
       });
+
+    els['day-start-hour'].addEventListener('change', () => updatePlannerHours());
+    els['day-end-hour'].addEventListener('change', () => updatePlannerHours());
 
     els['export-btn'].addEventListener('click', exportData);
     els['import-btn'].addEventListener('click', () => els['import-file-input'].click());
@@ -107,6 +129,21 @@
     els['reset-all-btn'].addEventListener('click', resetAllData);
     els['theme-toggle'].addEventListener('click', cycleTheme);
 
+    els['planner-date'].addEventListener('change', (e) => {
+      state.ui.plannerDate = e.target.value || dayKey(new Date());
+      renderPlanner();
+    });
+
+    els['block-form'].addEventListener('submit', onSaveBlock);
+    els['block-cancel-btn'].addEventListener('click', () => clearBlockForm());
+    els['planner-timeline'].addEventListener('click', onPlannerTimelineClick);
+
+    els['todo-form'].addEventListener('submit', onAddTodo);
+    els['todo-list'].addEventListener('click', onTodoListClick);
+
+    els['heatmap-grid'].addEventListener('click', onHeatmapClick);
+    els['heatmap-detail'].addEventListener('click', onHeatmapDetailClick);
+
     document.addEventListener('keydown', onKeyboard);
     document.addEventListener('visibilitychange', () => { if (state.timer.running) syncTimer(); });
   }
@@ -114,7 +151,12 @@
   function onKeyboard(e) {
     const target = e.target;
     if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-    if (e.code === 'Space') { e.preventDefault(); if (!state.timer.running) startTimer(); else if (!state.timer.paused) pauseTimer(); else resumeTimer(); }
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (!state.timer.running) startTimer();
+      else if (!state.timer.paused) pauseTimer();
+      else resumeTimer();
+    }
     if (e.key.toLowerCase() === 'r') resetCurrentSession();
     if (e.key.toLowerCase() === 's') endCurrentSession(false, 'skip');
   }
@@ -133,9 +175,8 @@
 
   function startTimer() {
     if (state.timer.running) return;
-    if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) {
-      initializeTimer();
-    }
+    if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) initializeTimer();
+
     const now = Date.now();
     state.timer.running = true;
     state.timer.paused = false;
@@ -176,7 +217,7 @@
   }
 
   function endCurrentSession(completed, reason, nowMs = Date.now()) {
-    const shouldConfirm = state.data.settings.endSessionConfirmation && !completed && ['skip','reset'].includes(reason);
+    const shouldConfirm = state.data.settings.endSessionConfirmation && !completed && ['skip', 'reset'].includes(reason);
     if (shouldConfirm && !window.confirm('End this session now?')) return;
 
     clearInterval(state.timer.tickId);
@@ -186,6 +227,7 @@
 
     if (state.timer.startedAtMs || completed) {
       const endAt = completed ? new Date((state.timer.startedAtMs || nowMs) + plannedDuration * 1000) : new Date(nowMs);
+      const note = state.timer.mode === 'focus' ? state.ui.pendingSessionNote : null;
       state.data.sessions.push({
         id: makeId(),
         sessionType: normalizeMode(state.timer.mode),
@@ -194,12 +236,14 @@
         durationSeconds,
         completed,
         taskId: state.timer.activeTaskId,
+        note: note || undefined,
       });
 
       if (completed && state.timer.mode === 'focus' && state.timer.activeTaskId) {
         const task = state.data.tasks.find((t) => t.id === state.timer.activeTaskId);
         if (task) task.pomodoros += 1;
       }
+      if (state.timer.mode === 'focus') state.ui.pendingSessionNote = null;
       debouncedSave();
     }
 
@@ -213,10 +257,8 @@
     state.timer.endAtMs = null;
     state.timer.paused = false;
 
-    const shouldAutoStart = completed && state.data.settings.autoStartNext;
-    if (shouldAutoStart) {
-      startTimer();
-    } else {
+    if (completed && state.data.settings.autoStartNext) startTimer();
+    else {
       state.timer.running = false;
       render();
     }
@@ -232,9 +274,7 @@
   }
 
   function nextMode(currentMode, focusCompletedCount, longBreakInterval) {
-    if (currentMode === 'focus') {
-      return focusCompletedCount % longBreakInterval === 0 ? 'long_break' : 'short_break';
-    }
+    if (currentMode === 'focus') return focusCompletedCount % longBreakInterval === 0 ? 'long_break' : 'short_break';
     return 'focus';
   }
 
@@ -250,6 +290,7 @@
     renderTimer();
     renderSettings();
     renderTasks();
+    renderPlanner();
     renderStats();
     els['status-message'].textContent = state.ui.message;
   }
@@ -277,13 +318,17 @@
   }
 
   function renderSettings() {
-    els['focus-minutes'].value = state.data.settings.focusMinutes;
-    els['short-break-minutes'].value = state.data.settings.shortBreakMinutes;
-    els['long-break-minutes'].value = state.data.settings.longBreakMinutes;
-    els['long-break-interval'].value = state.data.settings.longBreakInterval;
-    els['sound-toggle'].checked = state.data.settings.soundEnabled;
-    els['confirm-toggle'].checked = state.data.settings.endSessionConfirmation;
-    els['archive-toggle'].checked = state.data.settings.archiveCompletedTasks;
+    const s = state.data.settings;
+    els['focus-minutes'].value = s.focusMinutes;
+    els['short-break-minutes'].value = s.shortBreakMinutes;
+    els['long-break-minutes'].value = s.longBreakMinutes;
+    els['long-break-interval'].value = s.longBreakInterval;
+    els['sound-toggle'].checked = s.soundEnabled;
+    els['confirm-toggle'].checked = s.endSessionConfirmation;
+    els['archive-toggle'].checked = s.archiveCompletedTasks;
+    els['day-start-hour'].value = s.dayStartHour;
+    els['day-end-hour'].value = s.dayEndHour;
+    els['heatmap-metric'].value = s.heatmapMetric;
   }
 
   function renderTasks() {
@@ -298,11 +343,69 @@
           ${task.archived ? '<em>(archived)</em>' : ''}
         </div>
         <div class="task-actions">
-          <button class="btn small" data-action="rename">Rename</button>
-          <button class="btn small" data-action="archive">${task.archived ? 'Unarchive' : 'Archive'}</button>
-          <button class="btn small danger" data-action="delete">Delete</button>
+          <button class="btn" data-action="rename">Rename</button>
+          <button class="btn" data-action="archive">${task.archived ? 'Unarchive' : 'Archive'}</button>
+          <button class="btn danger" data-action="delete">Delete</button>
         </div>
       </li>`).join('') || '<li>No tasks yet.</li>';
+  }
+
+  function renderPlanner() {
+    els['planner-date'].value = state.ui.plannerDate;
+    const day = getPlannerDay(state.ui.plannerDate);
+    renderPlannerHours();
+    renderTimeline(day.timeBlocks);
+    renderDailyTodos(day.dailyTodos);
+  }
+
+  function renderPlannerHours() {
+    const { dayStartHour, dayEndHour } = state.data.settings;
+    const rows = [];
+    for (let h = dayStartHour; h < dayEndHour; h += 1) rows.push(`<div class="hour-mark">${String(h).padStart(2, '0')}:00</div>`);
+    els['planner-hours'].innerHTML = rows.join('');
+    const height = (dayEndHour - dayStartHour) * 48;
+    els['planner-timeline'].style.height = `${Math.max(96, height)}px`;
+  }
+
+  function renderTimeline(blocks) {
+    const s = state.data.settings;
+    const startDayMinutes = s.dayStartHour * 60;
+    const rangeMinutes = (s.dayEndHour - s.dayStartHour) * 60;
+
+    const html = [...blocks].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)).map((block) => {
+      const start = timeToMinutes(block.start);
+      const end = timeToMinutes(block.end);
+      const top = ((start - startDayMinutes) / rangeMinutes) * 100;
+      const height = Math.max(3, ((end - start) / rangeMinutes) * 100);
+      return `<div class="time-block" style="top:${top}%;height:${height}%;" data-block-id="${block.id}">
+        <div><strong>${escapeHtml(block.title)}</strong><br/>${block.start} - ${block.end}</div>
+        <div class="block-actions">
+          <button class="btn" data-action="start-focus">Focus</button>
+          <button class="btn" data-action="edit">Edit</button>
+          <button class="btn danger" data-action="delete">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    els['planner-timeline'].innerHTML = html || '<p style="padding:.6rem;color:var(--muted)">No time blocks for this day.</p>';
+  }
+
+  function renderDailyTodos(todos) {
+    els['todo-list'].innerHTML = todos.map((todo, index) => `
+      <li class="task-item" data-todo-id="${todo.id}">
+        <div class="task-main">
+          <input type="checkbox" ${todo.done ? 'checked' : ''} data-action="toggle" aria-label="Toggle todo" />
+          <span>${todo.done ? '<s>' : ''}${escapeHtml(todo.text)}${todo.done ? '</s>' : ''}</span>
+          ${todo.scheduled ? '<em>Scheduled</em>' : ''}
+        </div>
+        <div class="task-actions">
+          <button class="btn" data-action="up" ${index === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn" data-action="down" ${index === todos.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="btn" data-action="edit">Edit</button>
+          <button class="btn" data-action="schedule">Schedule</button>
+          <button class="btn danger" data-action="delete">Delete</button>
+        </div>
+      </li>`).join('') || '<li>No todos for this day.</li>';
   }
 
   function renderStats() {
@@ -315,6 +418,8 @@
 
     renderWeekChart(stats.last7Days);
     renderHistory();
+    renderHeatmap(stats.daily);
+    renderHeatmapDetail();
   }
 
   function renderWeekChart(last7Days) {
@@ -323,6 +428,45 @@
       const h = (d.minutes / max) * 100;
       return `<div class="bar"><div class="bar-value">${d.minutes}</div><div class="bar-rect" style="height:${h}%"></div><div class="bar-label">${d.label}</div></div>`;
     }).join('');
+  }
+
+  function renderHeatmap(dailyMap) {
+    const metric = state.data.settings.heatmapMetric;
+    const days = [];
+    for (let i = 364; i >= 0; i -= 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = dayKey(d);
+      const val = dailyMap.get(key) || { minutes: 0, sessions: 0 };
+      days.push({ key, value: metric === 'focus_minutes' ? val.minutes : val.sessions });
+    }
+    const max = Math.max(1, ...days.map((d) => d.value));
+    els['heatmap-grid'].innerHTML = days.map((d) => {
+      const ratio = d.value / max;
+      const lvl = d.value === 0 ? 0 : ratio > 0.75 ? 4 : ratio > 0.5 ? 3 : ratio > 0.25 ? 2 : 1;
+      return `<button class="heatmap-cell heat-${lvl}" data-date="${d.key}" title="${d.key}: ${d.value}"></button>`;
+    }).join('');
+  }
+
+  function renderHeatmapDetail() {
+    const detailEl = els['heatmap-detail'];
+    const day = state.ui.selectedHeatmapDay;
+    if (!day) {
+      detailEl.hidden = true;
+      detailEl.innerHTML = '';
+      return;
+    }
+
+    const sessions = state.data.sessions.filter((s) => dayKey(new Date(s.endTime)) === day && s.sessionType === 'focus' && s.completed);
+    const taskMap = new Map(state.data.tasks.map((t) => [t.id, t.name]));
+    const minutes = Math.round(sessions.reduce((sum, s) => sum + s.durationSeconds / 60, 0));
+    detailEl.hidden = false;
+    detailEl.innerHTML = `
+      <h3>${day}</h3>
+      <p>Focus minutes: <strong>${minutes}</strong> | Completed focus sessions: <strong>${sessions.length}</strong></p>
+      <ul>${sessions.map((s) => `<li>${new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${escapeHtml(taskMap.get(s.taskId) || 'No task')}${s.note ? ` · ${escapeHtml(s.note)}` : ''}</li>`).join('') || '<li>No completed focus sessions.</li>'}</ul>
+      <button class="btn" data-action="open-planner">Open Planner</button>
+    `;
   }
 
   function renderHistory() {
@@ -336,7 +480,7 @@
         <td>${formatDateTime(s.endTime)}</td>
         <td>${Math.round(s.durationSeconds / 60)}</td>
         <td>${s.completed ? 'Yes' : 'No'}</td>
-        <td>${s.taskId ? escapeHtml(tasksMap.get(s.taskId) || '(deleted)') : '—'}</td>
+        <td>${s.taskId ? escapeHtml(tasksMap.get(s.taskId) || '(deleted)') : '—'}${s.note ? ` · ${escapeHtml(s.note)}` : ''}</td>
       </tr>
     `).join('') || '<tr><td colspan="6">No session history.</td></tr>';
   }
@@ -358,22 +502,188 @@
     const task = state.data.tasks.find((t) => t.id === taskId);
     if (!task) return;
 
-    if (e.target.matches('input[type="radio"]')) {
-      state.timer.activeTaskId = taskId;
-    } else if (e.target.dataset.action === 'rename') {
+    if (e.target.matches('input[type="radio"]')) state.timer.activeTaskId = taskId;
+    else if (e.target.dataset.action === 'rename') {
       const name = prompt('Rename task', task.name);
       if (name && name.trim()) task.name = name.trim();
-    } else if (e.target.dataset.action === 'archive') {
-      task.archived = !task.archived;
-    } else if (e.target.dataset.action === 'delete') {
-      if (confirm('Delete task?')) {
-        state.data.tasks = state.data.tasks.filter((t) => t.id !== taskId);
-        if (state.timer.activeTaskId === taskId) state.timer.activeTaskId = null;
-      }
+    } else if (e.target.dataset.action === 'archive') task.archived = !task.archived;
+    else if (e.target.dataset.action === 'delete' && confirm('Delete task?')) {
+      state.data.tasks = state.data.tasks.filter((t) => t.id !== taskId);
+      if (state.timer.activeTaskId === taskId) state.timer.activeTaskId = null;
     }
 
     debouncedSave();
     render();
+  }
+
+  function onSaveBlock(e) {
+    e.preventDefault();
+    const date = state.ui.plannerDate;
+    const day = getPlannerDay(date);
+    const start = els['block-start'].value;
+    const end = els['block-end'].value;
+    const title = els['block-title'].value.trim();
+    if (!validateBlock(start, end)) return setMessage('Invalid block time. Ensure within day bounds and start < end.', true);
+    if (!title) return setMessage('Block title is required.', true);
+
+    const id = els['block-id'].value;
+    if (id) {
+      const block = day.timeBlocks.find((b) => b.id === id);
+      if (block) Object.assign(block, { start, end, title });
+    } else {
+      day.timeBlocks.push({ id: makeId(), start, end, title, createdAt: new Date().toISOString(), source: 'manual', todoId: null });
+    }
+
+    clearBlockForm();
+    debouncedSave();
+    renderPlanner();
+  }
+
+  function onPlannerTimelineClick(e) {
+    const blockEl = e.target.closest('[data-block-id]');
+    if (!blockEl) return;
+    const blockId = blockEl.dataset.blockId;
+    const day = getPlannerDay(state.ui.plannerDate);
+    const block = day.timeBlocks.find((b) => b.id === blockId);
+    if (!block) return;
+
+    const action = e.target.dataset.action;
+    if (action === 'edit') {
+      els['block-id'].value = block.id;
+      els['block-start'].value = block.start;
+      els['block-end'].value = block.end;
+      els['block-title'].value = block.title;
+    } else if (action === 'delete') {
+      day.timeBlocks = day.timeBlocks.filter((b) => b.id !== blockId);
+      day.dailyTodos.forEach((todo) => {
+        if (todo.blockId === blockId) {
+          todo.blockId = null;
+          todo.scheduled = false;
+        }
+      });
+      debouncedSave();
+      renderPlanner();
+    } else if (action === 'start-focus') {
+      startFocusFromBlock(block);
+    }
+  }
+
+  function startFocusFromBlock(block) {
+    if (state.timer.running || state.timer.paused) {
+      endCurrentSession(false, 'reset');
+      if (state.timer.running || state.timer.paused) return;
+    }
+    state.ui.pendingSessionNote = block.title;
+    state.timer.mode = 'focus';
+    initializeTimer();
+    state.ui.activeTab = 'timer';
+    startTimer();
+    setMessage(`Started focus from block: ${block.title}`);
+  }
+
+  function clearBlockForm() {
+    els['block-id'].value = '';
+    els['block-start'].value = '';
+    els['block-end'].value = '';
+    els['block-title'].value = '';
+  }
+
+  function onAddTodo(e) {
+    e.preventDefault();
+    const text = els['todo-input'].value.trim();
+    if (!text) return;
+    const day = getPlannerDay(state.ui.plannerDate);
+    day.dailyTodos.push({ id: makeId(), text, done: false, createdAt: new Date().toISOString(), scheduled: false, blockId: null });
+    els['todo-input'].value = '';
+    debouncedSave();
+    renderPlanner();
+  }
+
+  function onTodoListClick(e) {
+    const li = e.target.closest('[data-todo-id]');
+    if (!li) return;
+    const todoId = li.dataset.todoId;
+    const day = getPlannerDay(state.ui.plannerDate);
+    const idx = day.dailyTodos.findIndex((t) => t.id === todoId);
+    if (idx < 0) return;
+    const todo = day.dailyTodos[idx];
+    const action = e.target.dataset.action;
+
+    if (action === 'toggle') todo.done = !todo.done;
+    else if (action === 'edit') {
+      const nextText = prompt('Edit todo', todo.text);
+      if (nextText && nextText.trim()) todo.text = nextText.trim();
+    } else if (action === 'delete') {
+      day.dailyTodos.splice(idx, 1);
+      if (todo.blockId) day.timeBlocks = day.timeBlocks.filter((b) => b.id !== todo.blockId);
+    } else if (action === 'up' && idx > 0) {
+      [day.dailyTodos[idx - 1], day.dailyTodos[idx]] = [day.dailyTodos[idx], day.dailyTodos[idx - 1]];
+    } else if (action === 'down' && idx < day.dailyTodos.length - 1) {
+      [day.dailyTodos[idx + 1], day.dailyTodos[idx]] = [day.dailyTodos[idx], day.dailyTodos[idx + 1]];
+    } else if (action === 'schedule') {
+      const start = prompt('Start time (HH:MM)', '09:00');
+      const end = prompt('End time (HH:MM)', '09:30');
+      if (!start || !end) return;
+      if (!validateBlock(start, end)) return setMessage('Invalid schedule time for todo.', true);
+
+      const blockId = makeId();
+      day.timeBlocks.push({ id: blockId, start, end, title: todo.text, createdAt: new Date().toISOString(), source: 'todo', todoId: todo.id });
+      todo.scheduled = true;
+      todo.blockId = blockId;
+    }
+
+    debouncedSave();
+    renderPlanner();
+  }
+
+  function onHeatmapClick(e) {
+    const cell = e.target.closest('[data-date]');
+    if (!cell) return;
+    state.ui.selectedHeatmapDay = cell.dataset.date;
+    renderHeatmapDetail();
+  }
+
+  function onHeatmapDetailClick(e) {
+    if (e.target.dataset.action !== 'open-planner') return;
+    if (!state.ui.selectedHeatmapDay) return;
+    state.ui.plannerDate = state.ui.selectedHeatmapDay;
+    state.ui.activeTab = 'planner';
+    render();
+  }
+
+  function updatePlannerHours() {
+    const start = Number(els['day-start-hour'].value);
+    const end = Number(els['day-end-hour'].value);
+    if (!(Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end <= 24 && start < end)) {
+      setMessage('Invalid planner hours. dayStartHour must be < dayEndHour and both within 0..24.', true);
+      renderSettings();
+      return;
+    }
+    updateSetting('dayStartHour', start);
+    updateSetting('dayEndHour', end);
+    renderPlanner();
+  }
+
+  function getPlannerDay(dateKey) {
+    if (!state.data.planner.days[dateKey]) {
+      state.data.planner.days[dateKey] = { notes: '', dailyTodos: [], timeBlocks: [] };
+    }
+    return state.data.planner.days[dateKey];
+  }
+
+  function validateBlock(start, end) {
+    const s = timeToMinutes(start);
+    const e = timeToMinutes(end);
+    if (s < 0 || e < 0 || e <= s) return false;
+    const dayStart = state.data.settings.dayStartHour * 60;
+    const dayEnd = state.data.settings.dayEndHour * 60;
+    return s >= dayStart && e <= dayEnd;
+  }
+
+  function timeToMinutes(hhmm) {
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm || '');
+    if (!m) return -1;
+    return Number(m[1]) * 60 + Number(m[2]);
   }
 
   function populateActiveTaskSelect() {
@@ -415,14 +725,10 @@
       const parsed = validateImport(JSON.parse(text));
       const choice = prompt('Import mode: type "replace" to overwrite local data, or "merge" to combine.', 'merge');
       if (!choice) return;
-      if (choice.toLowerCase() === 'replace') {
-        state.data = parsed;
-      } else if (choice.toLowerCase() === 'merge') {
-        state.data = mergeData(state.data, parsed);
-      } else {
-        setMessage('Import cancelled: unrecognized mode.', true);
-        return;
-      }
+      if (choice.toLowerCase() === 'replace') state.data = parsed;
+      else if (choice.toLowerCase() === 'merge') state.data = mergeData(state.data, parsed);
+      else return setMessage('Import cancelled: unrecognized mode.', true);
+
       persistData(state.data);
       initializeTimer();
       render();
@@ -452,10 +758,11 @@
   }
 
   function resetAllData() {
-    if (!confirm('Reset all tasks, sessions, and settings?')) return;
+    if (!confirm('Reset all tasks, sessions, planner data, and settings?')) return;
     state.data = structuredClone(DEFAULT_DATA);
     state.timer.phaseCount = 0;
     state.timer.activeTaskId = null;
+    state.ui.plannerDate = dayKey(new Date());
     persistData(state.data);
     initializeTimer();
     render();
@@ -477,10 +784,16 @@
 
   function loadData() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return structuredClone(DEFAULT_DATA);
-      const parsed = JSON.parse(raw);
-      return migrateData(parsed);
+      const rawV2 = localStorage.getItem(STORAGE_KEY);
+      if (rawV2) return migrateData(JSON.parse(rawV2));
+
+      const rawV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (rawV1) {
+        const migrated = migrateData(JSON.parse(rawV1));
+        persistData(migrated);
+        return migrated;
+      }
+      return structuredClone(DEFAULT_DATA);
     } catch {
       return structuredClone(DEFAULT_DATA);
     }
@@ -492,23 +805,34 @@
 
   function migrateData(input) {
     if (!input || typeof input !== 'object') return structuredClone(DEFAULT_DATA);
+
+    if (input.version === 1) {
+      return {
+        version: 2,
+        settings: sanitizeSettings({ ...DEFAULT_DATA.settings, ...(input.settings || {}) }),
+        tasks: Array.isArray(input.tasks) ? input.tasks : [],
+        sessions: Array.isArray(input.sessions) ? input.sessions.map((s) => ({ ...s, note: s.note || undefined })) : [],
+        planner: { days: {} },
+      };
+    }
+
     if (input.version === APP_VERSION) {
       return {
         version: APP_VERSION,
         settings: sanitizeSettings({ ...DEFAULT_DATA.settings, ...(input.settings || {}) }),
         tasks: Array.isArray(input.tasks) ? input.tasks : [],
-        sessions: Array.isArray(input.sessions) ? input.sessions : [],
+        sessions: Array.isArray(input.sessions) ? input.sessions.map((s) => ({ ...s, note: s.note || undefined })) : [],
+        planner: sanitizePlanner(input.planner),
       };
     }
-    // Stub for future migrations.
+
     throw new Error(`Unsupported data version: ${input.version}`);
   }
 
   function validateImport(obj) {
     const migrated = migrateData(obj);
-    if (!Array.isArray(migrated.tasks) || !Array.isArray(migrated.sessions)) {
-      throw new Error('Invalid schema: tasks/sessions must be arrays.');
-    }
+    if (!Array.isArray(migrated.tasks) || !Array.isArray(migrated.sessions)) throw new Error('Invalid schema: tasks/sessions must be arrays.');
+    if (!migrated.planner || typeof migrated.planner !== 'object') throw new Error('Invalid schema: planner missing.');
     return migrated;
   }
 
@@ -521,15 +845,63 @@
       if (!sessionMap.has(session.id)) sessionMap.set(session.id, session);
     });
 
+    const days = { ...sanitizePlanner(base.planner).days };
+    for (const [date, incomingDay] of Object.entries(sanitizePlanner(incoming.planner).days)) {
+      const current = days[date] || { notes: '', dailyTodos: [], timeBlocks: [] };
+      const blockMap = new Map(current.timeBlocks.map((b) => [b.id, b]));
+      incomingDay.timeBlocks.forEach((b) => blockMap.set(b.id, { ...blockMap.get(b.id), ...b }));
+
+      const todoMap = new Map(current.dailyTodos.map((t) => [t.id, t]));
+      incomingDay.dailyTodos.forEach((t) => todoMap.set(t.id, { ...todoMap.get(t.id), ...t }));
+
+      days[date] = {
+        notes: incomingDay.notes || current.notes || '',
+        timeBlocks: [...blockMap.values()],
+        dailyTodos: [...todoMap.values()],
+      };
+    }
+
     return {
       version: APP_VERSION,
       settings: sanitizeSettings({ ...base.settings, ...incoming.settings }),
       tasks: [...taskMap.values()],
       sessions: [...sessionMap.values()].sort((a, b) => new Date(a.startTime) - new Date(b.startTime)),
+      planner: { days },
     };
   }
 
+  function sanitizePlanner(raw) {
+    const days = {};
+    const sourceDays = raw && typeof raw === 'object' && raw.days && typeof raw.days === 'object' ? raw.days : {};
+
+    for (const [date, day] of Object.entries(sourceDays)) {
+      days[date] = {
+        notes: typeof day.notes === 'string' ? day.notes : '',
+        dailyTodos: Array.isArray(day.dailyTodos) ? day.dailyTodos.map((t) => ({
+          id: t.id || makeId(),
+          text: String(t.text || ''),
+          done: Boolean(t.done),
+          createdAt: t.createdAt || new Date().toISOString(),
+          scheduled: Boolean(t.scheduled),
+          blockId: t.blockId || null,
+        })) : [],
+        timeBlocks: Array.isArray(day.timeBlocks) ? day.timeBlocks.map((b) => ({
+          id: b.id || makeId(),
+          start: String(b.start || '09:00'),
+          end: String(b.end || '09:30'),
+          title: String(b.title || 'Block'),
+          createdAt: b.createdAt || new Date().toISOString(),
+          source: b.source === 'todo' ? 'todo' : 'manual',
+          todoId: b.todoId || null,
+        })) : [],
+      };
+    }
+    return { days };
+  }
+
   function sanitizeSettings(raw) {
+    const start = toValidInt(raw.dayStartHour, DEFAULT_DATA.settings.dayStartHour, 0, 23);
+    const end = toValidInt(raw.dayEndHour, DEFAULT_DATA.settings.dayEndHour, 1, 24);
     return {
       focusMinutes: toValidInt(raw.focusMinutes, DEFAULT_DATA.settings.focusMinutes, 1, 120),
       shortBreakMinutes: toValidInt(raw.shortBreakMinutes, DEFAULT_DATA.settings.shortBreakMinutes, 1, 60),
@@ -540,6 +912,9 @@
       endSessionConfirmation: raw.endSessionConfirmation !== false,
       theme: ['system', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'system',
       archiveCompletedTasks: Boolean(raw.archiveCompletedTasks),
+      dayStartHour: Math.min(start, end - 1),
+      dayEndHour: Math.max(end, start + 1),
+      heatmapMetric: raw.heatmapMetric === 'focus_sessions' ? 'focus_sessions' : 'focus_minutes',
     };
   }
 
@@ -554,29 +929,33 @@
     const todayStr = dayKey(new Date());
     const todayFocus = focusCompleted.filter((s) => dayKey(new Date(s.endTime)) === todayStr);
 
-    const dailyMinutes = new Map();
+    const daily = new Map();
     focusCompleted.forEach((s) => {
       const key = dayKey(new Date(s.endTime));
-      dailyMinutes.set(key, (dailyMinutes.get(key) || 0) + s.durationSeconds / 60);
+      const current = daily.get(key) || { minutes: 0, sessions: 0 };
+      current.minutes += s.durationSeconds / 60;
+      current.sessions += 1;
+      daily.set(key, current);
     });
 
     const last7Days = Array.from({ length: 7 }).map((_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
       const key = dayKey(d);
-      return { label: d.toLocaleDateString(undefined, { weekday: 'short' }), minutes: Math.round(dailyMinutes.get(key) || 0), key };
+      return { label: d.toLocaleDateString(undefined, { weekday: 'short' }), minutes: Math.round((daily.get(key)?.minutes || 0)), key };
     });
 
-    const bestDayMinutes = Math.round(Math.max(0, ...dailyMinutes.values()));
-    const totalFocusMinutes = Math.round([...dailyMinutes.values()].reduce((a, b) => a + b, 0));
+    const bestDayMinutes = Math.round(Math.max(0, ...[...daily.values()].map((d) => d.minutes)));
+    const totalFocusMinutes = Math.round([...daily.values()].reduce((sum, d) => sum + d.minutes, 0));
 
     return {
       todayFocusMinutes: Math.round(todayFocus.reduce((sum, s) => sum + s.durationSeconds / 60, 0)),
       todayFocusCount: todayFocus.length,
-      streakDays: calculateStreak(dailyMinutes),
+      streakDays: calculateStreak(daily),
       last7Days,
       bestDayMinutes,
       totalFocusMinutes,
+      daily,
     };
   }
 
@@ -585,12 +964,10 @@
     const day = new Date();
     while (true) {
       const key = dayKey(day);
-      if ((dailyMap.get(key) || 0) > 0) {
+      if ((dailyMap.get(key)?.sessions || 0) > 0) {
         streak += 1;
         day.setDate(day.getDate() - 1);
-      } else {
-        break;
-      }
+      } else break;
     }
     return streak;
   }
@@ -613,7 +990,7 @@
   function setMessage(message, isError = false) {
     state.ui.message = message;
     els['status-message'].style.color = isError ? 'var(--danger)' : 'var(--muted)';
-    render();
+    els['status-message'].textContent = state.ui.message;
   }
 
   function debounce(fn, ms) {

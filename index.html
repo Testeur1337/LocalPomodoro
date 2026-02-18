@@ -54,6 +54,35 @@
         <ul id="task-list" class="task-list" aria-label="Task list"></ul>
       </section>
 
+      <section id="planner-panel" class="panel" aria-labelledby="tab-planner" hidden>
+        <div class="row space-between wrap">
+          <h3>Daily Planner</h3>
+          <label>Date <input id="planner-date" type="date" /></label>
+        </div>
+
+        <div class="planner-layout">
+          <div id="planner-hours" class="planner-hours"></div>
+          <div id="planner-timeline" class="planner-timeline" aria-label="Daily timeline"></div>
+        </div>
+
+        <h4>Time Block</h4>
+        <form id="block-form" class="row wrap" autocomplete="off">
+          <input id="block-id" type="hidden" />
+          <label>Start <input id="block-start" type="time" required /></label>
+          <label>End <input id="block-end" type="time" required /></label>
+          <input id="block-title" type="text" maxlength="140" placeholder="Block title" required aria-label="Block title" />
+          <button class="btn primary" type="submit">Save block</button>
+          <button id="block-cancel-btn" class="btn" type="button">Cancel edit</button>
+        </form>
+
+        <h4>Daily Todos</h4>
+        <form id="todo-form" class="row" autocomplete="off">
+          <input id="todo-input" type="text" maxlength="140" placeholder="Add daily todo" required aria-label="Daily todo" />
+          <button class="btn primary" type="submit">Add</button>
+        </form>
+        <ul id="todo-list" class="task-list" aria-label="Daily todos"></ul>
+      </section>
+
       <section id="stats-panel" class="panel" aria-labelledby="tab-stats" hidden>
         <div class="stats-grid">
           <article class="card"><h3>Today Focus (min)</h3><p id="today-focus-minutes">0</p></article>
@@ -65,6 +94,10 @@
 
         <h3>Last 7 Days</h3>
         <div id="week-chart" class="week-chart" aria-label="Weekly focus chart"></div>
+
+        <h3>Last 365 Days Heatmap</h3>
+        <div id="heatmap-grid" class="heatmap-grid" aria-label="Year heatmap"></div>
+        <div id="heatmap-detail" class="card" hidden></div>
 
         <div class="row space-between">
           <h3>Recent Sessions</h3>
@@ -106,6 +139,18 @@
         <label class="switch-row"><input id="sound-toggle" type="checkbox" /> Sound enabled</label>
         <label class="switch-row"><input id="confirm-toggle" type="checkbox" /> End-session confirmation</label>
 
+        <h3>Planner & Stats</h3>
+        <div class="settings-grid">
+          <label>Day start hour <input id="day-start-hour" type="number" min="0" max="23" /></label>
+          <label>Day end hour <input id="day-end-hour" type="number" min="1" max="24" /></label>
+          <label>Heatmap metric
+            <select id="heatmap-metric">
+              <option value="focus_minutes">Focus minutes</option>
+              <option value="focus_sessions">Focus sessions</option>
+            </select>
+          </label>
+        </div>
+
         <h3>Data Management</h3>
         <div class="controls">
           <button id="export-btn" class="btn">Export data</button>
@@ -120,6 +165,7 @@
       <nav class="tabbar" aria-label="Primary">
         <button id="tab-timer" class="tab active" data-tab="timer" aria-label="Open timer tab">Timer</button>
         <button id="tab-tasks" class="tab" data-tab="tasks" aria-label="Open tasks tab">Tasks</button>
+        <button id="tab-planner" class="tab" data-tab="planner" aria-label="Open planner tab">Planner</button>
         <button id="tab-stats" class="tab" data-tab="stats" aria-label="Open stats tab">Stats</button>
         <button id="tab-settings" class="tab" data-tab="settings" aria-label="Open settings tab">Settings</button>
       </nav>
