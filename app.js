@@ -3,7 +3,12 @@
 
   const STORAGE_KEY = 'mypomodoro_data_v2';
   const LEGACY_STORAGE_KEY = 'mypomodoro_data_v1';
+  const WORKSPACE_META_KEY = 'mypomodoro_workspace_meta_v1';
+  const WORKSPACE_HANDLE_DB = 'mypomodoro_workspace_db';
+  const WORKSPACE_HANDLE_STORE = 'handles';
+  const WORKSPACE_HANDLE_ID = 'last-workspace';
   const APP_VERSION = 2;
+  const NOTIFICATION_TAG = 'mypomodoro-session-complete';
 
   const DEFAULT_DATA = {
     version: APP_VERSION,
@@ -17,6 +22,7 @@
       endSessionConfirmation: true,
       theme: 'system',
       archiveCompletedTasks: false,
+      warnOnUnsavedExit: true,
       dayStartHour: 6,
       dayEndHour: 24,
       heatmapMetric: 'focus_minutes',
@@ -35,6 +41,7 @@
       plannerDate: dayKey(new Date()),
       selectedHeatmapDay: null,
       pendingSessionNote: null,
+      pendingFilePurpose: 'import',
     },
     timer: {
       mode: 'focus',
@@ -48,10 +55,19 @@
       activeTaskId: null,
       tickId: null,
     },
+    workspace: {
+      name: 'Local only',
+      dirty: false,
+      usingFileHandle: false,
+      lastSavedAt: null,
+      lastSavedFilename: null,
+      canOpenLastWorkspace: false,
+      handle: null,
+    },
   };
 
   const els = {};
-  const debouncedSave = debounce(() => persistData(state.data), 1000);
+  const debouncedSave = debounce(() => { markDirty(); persistData(state.data); }, 1000);
 
   init();
 
@@ -60,6 +76,7 @@
     bindEvents();
     applyTheme();
     initializeTimer();
+    initializeWorkspaceManager();
     render();
   }
 
@@ -68,7 +85,7 @@
       'mode-label', 'timer-display', 'progress-fill', 'start-btn', 'pause-btn', 'resume-btn', 'skip-btn', 'reset-btn', 'active-task-select', 'auto-start-toggle',
       'add-task-form', 'new-task-input', 'archive-toggle', 'task-list', 'today-focus-minutes', 'today-focus-count', 'streak-days', 'best-day', 'total-focus-hours',
       'week-chart', 'history-filter', 'history-body', 'focus-minutes', 'short-break-minutes', 'long-break-minutes', 'long-break-interval', 'sound-toggle', 'confirm-toggle',
-      'export-btn', 'import-btn', 'copy-btn', 'paste-btn', 'reset-all-btn', 'import-file-input', 'status-message', 'theme-toggle', 'planner-date', 'planner-hours', 'planner-timeline',
+      'export-btn', 'import-btn', 'copy-btn', 'paste-btn', 'reset-all-btn', 'import-file-input', 'status-message', 'theme-toggle', 'planner-date', 'planner-hours', 'planner-timeline', 'workspace-open-btn', 'workspace-open-last-btn', 'workspace-save-btn', 'workspace-save-as-btn', 'workspace-name', 'workspace-dirty', 'workspace-last-saved', 'warn-unsaved-toggle',
       'block-form', 'block-id', 'block-start', 'block-end', 'block-title', 'block-cancel-btn', 'todo-form', 'todo-input', 'todo-list', 'heatmap-grid', 'heatmap-detail',
       'day-start-hour', 'day-end-hour', 'heatmap-metric'
     ].forEach((id) => (els[id] = document.getElementById(id)));
@@ -106,6 +123,7 @@
     els['archive-toggle'].addEventListener('change', (e) => updateSetting('archiveCompletedTasks', e.target.checked));
     els['sound-toggle'].addEventListener('change', (e) => updateSetting('soundEnabled', e.target.checked));
     els['confirm-toggle'].addEventListener('change', (e) => updateSetting('endSessionConfirmation', e.target.checked));
+    els['warn-unsaved-toggle'].addEventListener('change', (e) => updateSetting('warnOnUnsavedExit', e.target.checked));
     els['history-filter'].addEventListener('change', (e) => { state.ui.historyFilter = e.target.value; render(); });
     els['heatmap-metric'].addEventListener('change', (e) => updateSetting('heatmapMetric', e.target.value));
 
@@ -122,12 +140,16 @@
     els['day-end-hour'].addEventListener('change', () => updatePlannerHours());
 
     els['export-btn'].addEventListener('click', exportData);
-    els['import-btn'].addEventListener('click', () => els['import-file-input'].click());
+    els['import-btn'].addEventListener('click', () => { state.ui.pendingFilePurpose = 'import'; els['import-file-input'].click(); });
     els['import-file-input'].addEventListener('change', onImportFile);
     els['copy-btn'].addEventListener('click', copyDataToClipboard);
     els['paste-btn'].addEventListener('click', pasteDataFromClipboard);
     els['reset-all-btn'].addEventListener('click', resetAllData);
     els['theme-toggle'].addEventListener('click', cycleTheme);
+    els['workspace-open-btn'].addEventListener('click', openWorkspaceFlow);
+    els['workspace-open-last-btn'].addEventListener('click', openLastWorkspace);
+    els['workspace-save-btn'].addEventListener('click', () => saveWorkspace(false));
+    els['workspace-save-as-btn'].addEventListener('click', () => saveWorkspace(true));
 
     els['planner-date'].addEventListener('change', (e) => {
       state.ui.plannerDate = e.target.value || dayKey(new Date());
@@ -146,6 +168,7 @@
 
     document.addEventListener('keydown', onKeyboard);
     document.addEventListener('visibilitychange', () => { if (state.timer.running) syncTimer(); });
+    window.addEventListener('beforeunload', onBeforeUnload);
   }
 
   function onKeyboard(e) {
@@ -176,6 +199,8 @@
   function startTimer() {
     if (state.timer.running) return;
     if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) initializeTimer();
+
+    requestNotificationPermissionIfNeeded();
 
     const now = Date.now();
     state.timer.running = true;
@@ -247,7 +272,10 @@
       debouncedSave();
     }
 
-    if (completed && state.data.settings.soundEnabled) playBeep();
+    if (completed) {
+      showSessionCompleteNotification(state.timer.mode);
+      if (state.data.settings.soundEnabled) playBeep();
+    }
 
     if (completed && state.timer.mode === 'focus') state.timer.phaseCount += 1;
     state.timer.mode = nextMode(state.timer.mode, state.timer.phaseCount, state.data.settings.longBreakInterval);
@@ -270,6 +298,7 @@
       return;
     }
     initializeTimer();
+    initializeWorkspaceManager();
     render();
   }
 
@@ -325,10 +354,12 @@
     els['long-break-interval'].value = s.longBreakInterval;
     els['sound-toggle'].checked = s.soundEnabled;
     els['confirm-toggle'].checked = s.endSessionConfirmation;
+    els['warn-unsaved-toggle'].checked = s.warnOnUnsavedExit !== false;
     els['archive-toggle'].checked = s.archiveCompletedTasks;
     els['day-start-hour'].value = s.dayStartHour;
     els['day-end-hour'].value = s.dayEndHour;
     els['heatmap-metric'].value = s.heatmapMetric;
+    renderWorkspaceStatus();
   }
 
   function renderTasks() {
@@ -694,30 +725,48 @@
 
   function updateSetting(key, value) {
     state.data.settings = sanitizeSettings({ ...state.data.settings, [key]: value });
+    markDirty();
     debouncedSave();
     if (key === 'theme') applyTheme();
     setMessage('Settings updated.');
   }
 
   function exportData() {
-    const json = JSON.stringify(state.data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
     const date = new Date().toISOString().slice(0, 10);
     const filename = `mypomodoro_backup_${date}.json`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJson(filename);
     setMessage(`Exported ${filename}`);
   }
 
   function onImportFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    file.text().then((text) => importJsonText(text)).catch(() => setMessage('Unable to read selected file.', true));
+    const purpose = state.ui.pendingFilePurpose || 'import';
+    file.text().then((text) => {
+      if (purpose === 'workspace') importWorkspaceJsonText(text, file.name);
+      else importJsonText(text);
+    }).catch(() => setMessage('Unable to read selected file.', true));
     e.target.value = '';
+    state.ui.pendingFilePurpose = 'import';
+  }
+
+
+  function importWorkspaceJsonText(text, fileName = 'Workspace JSON') {
+    try {
+      const parsed = validateImport(JSON.parse(text));
+      state.data = parsed;
+      persistData(state.data);
+      initializeTimer();
+      state.workspace.handle = null;
+      state.workspace.usingFileHandle = false;
+      state.workspace.name = fileName;
+      state.workspace.lastSavedFilename = fileName;
+      clearDirty();
+      render();
+      setMessage(`Workspace loaded: ${fileName}`);
+    } catch (err) {
+      setMessage(`Workspace load failed: ${err.message}`, true);
+    }
   }
 
   function importJsonText(text) {
@@ -730,6 +779,7 @@
       else return setMessage('Import cancelled: unrecognized mode.', true);
 
       persistData(state.data);
+      markDirty();
       initializeTimer();
       render();
       setMessage('Import successful.');
@@ -764,7 +814,9 @@
     state.timer.activeTaskId = null;
     state.ui.plannerDate = dayKey(new Date());
     persistData(state.data);
+    markDirty();
     initializeTimer();
+    initializeWorkspaceManager();
     render();
     setMessage('All data reset.');
   }
@@ -912,6 +964,7 @@
       endSessionConfirmation: raw.endSessionConfirmation !== false,
       theme: ['system', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'system',
       archiveCompletedTasks: Boolean(raw.archiveCompletedTasks),
+      warnOnUnsavedExit: raw.warnOnUnsavedExit !== false,
       dayStartHour: Math.min(start, end - 1),
       dayEndHour: Math.max(end, start + 1),
       heatmapMetric: raw.heatmapMetric === 'focus_sessions' ? 'focus_sessions' : 'focus_minutes',
@@ -985,6 +1038,253 @@
     gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
     osc.stop(ctx.currentTime + 0.26);
+  }
+
+  function requestNotificationPermissionIfNeeded() {
+    if (typeof window.Notification === 'undefined') return;
+    if (window.Notification.permission !== 'default') return;
+    window.Notification.requestPermission().catch(() => {});
+  }
+
+  function showSessionCompleteNotification(completedMode) {
+    if (typeof window.Notification === 'undefined') return;
+    if (window.Notification.permission !== 'granted') return;
+
+    const next = nextMode(completedMode, completedMode === 'focus' ? state.timer.phaseCount + 1 : state.timer.phaseCount, state.data.settings.longBreakInterval);
+    const body = `Finished ${humanMode(completedMode)}. Up next: ${humanMode(next)}.`;
+    const notification = new window.Notification('Pomodoro complete', {
+      body,
+      tag: NOTIFICATION_TAG,
+      renotify: true,
+    });
+
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+  }
+
+
+  async function initializeWorkspaceManager() {
+    const meta = loadWorkspaceMeta();
+    state.workspace.lastSavedAt = meta.lastSavedAt || null;
+    state.workspace.lastSavedFilename = meta.lastSavedFilename || null;
+    state.workspace.name = meta.workspaceName || 'Local only';
+    state.workspace.usingFileHandle = Boolean(meta.usingFileHandle);
+
+    if (hasFileSystemAccess()) {
+      const handle = await restoreWorkspaceHandle();
+      if (handle) {
+        state.workspace.handle = handle;
+        state.workspace.canOpenLastWorkspace = true;
+        state.workspace.usingFileHandle = true;
+      }
+    }
+    renderWorkspaceStatus();
+  }
+
+  function hasFileSystemAccess() {
+    return typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function';
+  }
+
+  function loadWorkspaceMeta() {
+    try {
+      return JSON.parse(localStorage.getItem(WORKSPACE_META_KEY) || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  function saveWorkspaceMeta(meta) {
+    localStorage.setItem(WORKSPACE_META_KEY, JSON.stringify({
+      workspaceName: state.workspace.name,
+      usingFileHandle: state.workspace.usingFileHandle,
+      lastSavedAt: state.workspace.lastSavedAt,
+      lastSavedFilename: state.workspace.lastSavedFilename,
+      ...meta,
+    }));
+  }
+
+  function markDirty() {
+    state.workspace.dirty = true;
+    renderWorkspaceStatus();
+  }
+
+  function clearDirty() {
+    state.workspace.dirty = false;
+    state.workspace.lastSavedAt = new Date().toISOString();
+    saveWorkspaceMeta();
+    renderWorkspaceStatus();
+  }
+
+  function renderWorkspaceStatus() {
+    if (!els['workspace-name']) return;
+    els['workspace-name'].textContent = state.workspace.name || 'Local only';
+    els['workspace-dirty'].textContent = state.workspace.dirty ? 'Unsaved changes' : 'Saved';
+    els['workspace-dirty'].className = state.workspace.dirty ? 'workspace-dirty' : 'workspace-saved';
+    if (state.workspace.lastSavedAt || state.workspace.lastSavedFilename) {
+      const at = state.workspace.lastSavedAt ? new Date(state.workspace.lastSavedAt).toLocaleString() : '—';
+      const file = state.workspace.lastSavedFilename || state.workspace.name || 'Local only';
+      els['workspace-last-saved'].textContent = `Last saved: ${at} (${file})`;
+    } else {
+      els['workspace-last-saved'].textContent = 'No workspace file saved yet.';
+    }
+    els['workspace-open-last-btn'].hidden = !state.workspace.canOpenLastWorkspace;
+  }
+
+  async function openWorkspaceFlow() {
+    try {
+      if (hasFileSystemAccess()) {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+          excludeAcceptAllOption: false,
+          multiple: false,
+        });
+        if (!handle) return;
+        await loadWorkspaceFromHandle(handle);
+        return;
+      }
+      state.ui.pendingFilePurpose = 'workspace';
+      els['import-file-input'].click();
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      setMessage(`Open workspace failed: ${err.message || err}`, true);
+    }
+  }
+
+  async function openLastWorkspace() {
+    if (!state.workspace.handle) {
+      const restored = await restoreWorkspaceHandle();
+      if (!restored) return setMessage('No previously authorized workspace found.', true);
+      state.workspace.handle = restored;
+    }
+    await loadWorkspaceFromHandle(state.workspace.handle);
+  }
+
+  async function loadWorkspaceFromHandle(handle) {
+    const file = await handle.getFile();
+    const text = await file.text();
+    const parsed = validateImport(JSON.parse(text));
+    state.data = parsed;
+    persistData(state.data);
+    initializeTimer();
+    state.workspace.handle = handle;
+    state.workspace.usingFileHandle = true;
+    state.workspace.name = file.name || 'Workspace JSON';
+    state.workspace.lastSavedFilename = file.name || null;
+    state.workspace.canOpenLastWorkspace = true;
+    await persistWorkspaceHandle(handle);
+    clearDirty();
+    render();
+    setMessage(`Workspace loaded: ${state.workspace.name}`);
+  }
+
+  async function saveWorkspace(forceSaveAs) {
+    try {
+      if (hasFileSystemAccess()) {
+        if (forceSaveAs || !state.workspace.handle) {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: suggestedWorkspaceFilename(),
+            types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+          });
+          if (!handle) return;
+          state.workspace.handle = handle;
+          state.workspace.usingFileHandle = true;
+          state.workspace.canOpenLastWorkspace = true;
+          await persistWorkspaceHandle(handle);
+        }
+
+        if (state.workspace.handle) {
+          const writable = await state.workspace.handle.createWritable();
+          await writable.write(JSON.stringify(state.data, null, 2));
+          await writable.close();
+          state.workspace.name = state.workspace.handle.name || state.workspace.name;
+          state.workspace.lastSavedFilename = state.workspace.handle.name || state.workspace.lastSavedFilename;
+          clearDirty();
+          setMessage(`Workspace saved: ${state.workspace.name}`);
+          return;
+        }
+      }
+
+      const filename = `localpomodoro_workspace_${new Date().toISOString().slice(0, 10)}.json`;
+      downloadJson(filename);
+      state.workspace.name = 'Local only';
+      state.workspace.usingFileHandle = false;
+      state.workspace.lastSavedFilename = filename;
+      clearDirty();
+      setMessage(`Workspace downloaded: ${filename}`);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      setMessage(`Save workspace failed: ${err.message || err}`, true);
+    }
+  }
+
+  function suggestedWorkspaceFilename() {
+    return `localpomodoro_workspace_${new Date().toISOString().slice(0, 10)}.json`;
+  }
+
+  function downloadJson(filename) {
+    const json = JSON.stringify(state.data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function persistWorkspaceHandle(handle) {
+    saveWorkspaceMeta();
+    try {
+      const db = await openWorkspaceDb();
+      await dbPut(db, WORKSPACE_HANDLE_ID, handle);
+    } catch {
+      // ignore if handle persistence isn't available
+    }
+  }
+
+  async function restoreWorkspaceHandle() {
+    try {
+      const db = await openWorkspaceDb();
+      return await dbGet(db, WORKSPACE_HANDLE_ID);
+    } catch {
+      return null;
+    }
+  }
+
+  function openWorkspaceDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(WORKSPACE_HANDLE_DB, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(WORKSPACE_HANDLE_STORE);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+    });
+  }
+
+  function dbPut(db, key, value) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(WORKSPACE_HANDLE_STORE, 'readwrite');
+      tx.objectStore(WORKSPACE_HANDLE_STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function dbGet(db, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(WORKSPACE_HANDLE_STORE, 'readonly');
+      const req = tx.objectStore(WORKSPACE_HANDLE_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function onBeforeUnload(e) {
+    if (state.workspace.dirty && state.data.settings.warnOnUnsavedExit !== false) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
   }
 
   function setMessage(message, isError = false) {
