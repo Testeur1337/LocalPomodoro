@@ -119,6 +119,14 @@ MyPomodoro is an offline, dependency-free Pomodoro + Life OS app.
   - note
   - saved as `session.quality`
 
+
+### Notifications (Windows side toast + fallback)
+
+- Session-complete toasts use the browser Web Notifications API (Action Center style on Windows).
+- You must click **Enable notifications** once in Settings to request permission (browser user-gesture requirement).
+- If permission is denied or notifications are unsupported, the app still alerts via an in-app "Session finished" banner and optional title flashing.
+
+
 ### Stats + review
 
 - 365-day heatmap

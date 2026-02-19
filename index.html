@@ -128,6 +128,12 @@
 
         <h3>Behavior</h3>
         <label class="switch-row"><input id="sound-toggle" type="checkbox" /> Sound enabled</label>
+        <label class="switch-row"><input id="system-notifications-toggle" type="checkbox" /> System notifications</label>
+        <div class="controls">
+          <button id="enable-notifications-btn" class="btn" type="button">Enable notifications</button>
+          <button id="test-notification-btn" class="btn" type="button">Test notification</button>
+        </div>
+        <label class="switch-row"><input id="flash-title-toggle" type="checkbox" /> Flash title when session ends</label>
         <label class="switch-row"><input id="confirm-toggle" type="checkbox" /> End-session confirmation</label>
         <label class="switch-row"><input id="warn-unsaved-toggle" type="checkbox" /> Warn before closing with unsaved changes</label>
 
@@ -189,6 +195,10 @@
       </nav>
 
       <p id="status-message" class="status" role="status"></p>
+      <div id="session-done-banner" class="session-done-banner" role="status" hidden>
+        <span id="session-done-text">Session finished.</span>
+        <button id="dismiss-done-banner-btn" class="btn" type="button">Dismiss</button>
+      </div>
     </main>
 
     <script src="app.js"></script>
