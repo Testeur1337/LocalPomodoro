@@ -8,7 +8,7 @@
   const WORKSPACE_HANDLE_DB = 'mypomodoro_workspace_db';
   const WORKSPACE_HANDLE_STORE = 'handles';
   const WORKSPACE_HANDLE_ID = 'last-workspace';
-  const NOTIFICATION_TAG = 'localpomodoro-session-complete';
+  const DONE_TITLE = '⏰ DONE — localpomodoro';
   const APP_VERSION = 3;
 
   const DEFAULT_DATA = {
@@ -28,7 +28,9 @@
       endSessionConfirmation: true,
       heatmapMetric: 'focus_minutes',
       dailyFocusTargetMinutes: 120,
-      warnOnUnsavedChanges: true
+      warnOnUnsavedChanges: true,
+      systemNotificationsEnabled: false,
+      flashTitleOnDone: true
     },
     hierarchy: { goals: [], projects: [], topics: [] },
     daily: { days: {} },
@@ -40,7 +42,8 @@
     data: loadData(),
     ui: {
       activeTab: 'timer', plannerDate: dayKey(new Date()), selectedHeatmapDay: null, message: '',
-      activeContext: { goalId: '', projectId: '', topicId: '' }, pendingFilePurpose: 'import', pendingReflectionSessionId: null
+      activeContext: { goalId: '', projectId: '', topicId: '' }, pendingFilePurpose: 'import', pendingReflectionSessionId: null,
+      notificationPermission: typeof window.Notification === 'undefined' ? 'unsupported' : window.Notification.permission
     },
     timer: {
       mode: 'focus', phaseCount: 0, running: false, paused: false, startedAtMs: null, endAtMs: null,
@@ -48,6 +51,13 @@
     },
     workspace: {
       name: 'Local only', dirty: false, usingFileHandle: false, lastSavedAt: null, lastSavedFilename: null, canOpenLastWorkspace: false, handle: null
+    },
+    notifications: {
+      lastNotifiedSessionId: null,
+      flashTimerId: null,
+      flashStopTimeoutId: null,
+      flashOriginalTitle: document.title,
+      flashState: false
     }
   };
 
@@ -78,10 +88,10 @@
       'goal-form','goal-input','goal-list','project-form','project-goal-select','project-input','project-list','topic-form','topic-project-select','topic-input','topic-list',
       'today-focus-minutes','today-focus-count','streak-days','longest-streak-days','total-focus-hours','heatmap-grid','heatmap-detail','weekly-summary',
       'weekly-review-form','weekly-reflection','weekly-intention',
-      'focus-minutes','short-break-minutes','long-break-minutes','long-break-interval','daily-focus-target-minutes','sound-toggle','confirm-toggle','warn-unsaved-toggle',
+      'focus-minutes','short-break-minutes','long-break-minutes','long-break-interval','daily-focus-target-minutes','sound-toggle','system-notifications-toggle','enable-notifications-btn','test-notification-btn','flash-title-toggle','confirm-toggle','warn-unsaved-toggle',
       'day-start-hour','day-end-hour','heatmap-metric','theme-toggle',
       'workspace-open-btn','workspace-open-last-btn','workspace-save-btn','workspace-save-as-btn','workspace-name','workspace-dirty','workspace-last-saved',
-      'export-btn','import-btn','copy-btn','paste-btn','reset-all-btn','import-file-input','status-message',
+      'export-btn','import-btn','copy-btn','paste-btn','reset-all-btn','import-file-input','status-message','session-done-banner','session-done-text','dismiss-done-banner-btn',
       'reflection-dialog','reflection-form','reflection-rating','reflection-distractions','reflection-note'
     ].forEach((id) => { els[id] = document.getElementById(id); });
     els.tabs = Array.from(document.querySelectorAll('.tab'));
@@ -118,6 +128,11 @@
 
     els['auto-start-toggle'].addEventListener('change', (e) => updateSetting('autoStartNext', e.target.checked));
     els['sound-toggle'].addEventListener('change', (e) => updateSetting('soundEnabled', e.target.checked));
+    els['system-notifications-toggle'].addEventListener('change', (e) => updateSetting('systemNotificationsEnabled', e.target.checked));
+    els['flash-title-toggle'].addEventListener('change', (e) => updateSetting('flashTitleOnDone', e.target.checked));
+    els['enable-notifications-btn'].addEventListener('click', onEnableNotificationsClick);
+    els['test-notification-btn'].addEventListener('click', onTestNotificationClick);
+    els['dismiss-done-banner-btn'].addEventListener('click', dismissDoneBanner);
     els['confirm-toggle'].addEventListener('change', (e) => updateSetting('endSessionConfirmation', e.target.checked));
     els['warn-unsaved-toggle'].addEventListener('change', (e) => updateSetting('warnOnUnsavedChanges', e.target.checked));
     els['heatmap-metric'].addEventListener('change', (e) => updateSetting('heatmapMetric', e.target.value));
@@ -148,7 +163,12 @@
     els.tabs.forEach((tab) => tab.addEventListener('click', () => { state.ui.activeTab = tab.dataset.tab; render(); }));
 
     document.addEventListener('keydown', onKeyboard);
-    document.addEventListener('visibilitychange', () => { if (state.timer.running) syncTimer(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        dismissDoneBanner();
+      }
+      if (state.timer.running) syncTimer();
+    });
     window.addEventListener('beforeunload', onBeforeUnload);
   }
 
@@ -172,7 +192,6 @@
 
   function startTimer() {
     if (state.timer.running) return;
-    requestNotificationPermissionIfNeeded();
     if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) initializeTimer();
     const now = Date.now();
     state.timer.running = true;
@@ -220,6 +239,7 @@
     const elapsed = state.timer.startedAtMs ? Math.min(plannedDuration, Math.max(0, Math.round((nowMs - state.timer.startedAtMs) / 1000))) : 0;
     const durationSeconds = completed ? plannedDuration : elapsed;
 
+    let completedSession = null;
     if (state.timer.startedAtMs || completed) {
       const endAt = completed ? new Date((state.timer.startedAtMs || nowMs) + plannedDuration * 1000) : new Date(nowMs);
       const context = currentContextOrNull();
@@ -234,6 +254,7 @@
       if (context) item.context = context;
       if (state.timer.pendingBlockTitle) item.note = state.timer.pendingBlockTitle;
       state.data.sessions.push(item);
+      if (completed) completedSession = item;
       state.timer.pendingBlockTitle = null;
       debouncedSave();
       if (completed && state.timer.mode === 'focus') {
@@ -243,7 +264,7 @@
     }
 
     if (completed) {
-      showSessionCompleteNotification(state.timer.mode);
+      handleCompletedSessionNotification(completedSession, state.timer.mode);
       if (state.data.settings.soundEnabled) playBeep();
     }
 
@@ -651,11 +672,14 @@
     els['long-break-interval'].value = s.longBreakInterval;
     els['daily-focus-target-minutes'].value = s.dailyFocusTargetMinutes;
     els['sound-toggle'].checked = s.soundEnabled;
+    els['system-notifications-toggle'].checked = Boolean(s.systemNotificationsEnabled);
+    els['flash-title-toggle'].checked = s.flashTitleOnDone !== false;
     els['confirm-toggle'].checked = s.endSessionConfirmation;
     els['warn-unsaved-toggle'].checked = s.warnOnUnsavedChanges !== false;
     els['day-start-hour'].value = s.dayStartHour;
     els['day-end-hour'].value = s.dayEndHour;
     els['heatmap-metric'].value = s.heatmapMetric;
+    renderNotificationPermissionState();
   }
 
   function updateSetting(key, value) {
@@ -862,7 +886,9 @@
       endSessionConfirmation: raw.endSessionConfirmation !== false,
       heatmapMetric: raw.heatmapMetric === 'focus_sessions' ? 'focus_sessions' : 'focus_minutes',
       dailyFocusTargetMinutes: toValidInt(raw.dailyFocusTargetMinutes, 120, 10, 1000),
-      warnOnUnsavedChanges: raw.warnOnUnsavedChanges !== false
+      warnOnUnsavedChanges: raw.warnOnUnsavedChanges !== false,
+      systemNotificationsEnabled: Boolean(raw.systemNotificationsEnabled),
+      flashTitleOnDone: raw.flashTitleOnDone !== false
     };
   }
 
@@ -1094,28 +1120,137 @@
     if (state.workspace.dirty && state.data.settings.warnOnUnsavedChanges !== false) { e.preventDefault(); e.returnValue = ''; }
   }
 
-  function requestNotificationPermissionIfNeeded() {
-    if (typeof window.Notification === 'undefined') return;
-    if (window.Notification.permission !== 'default') return;
-    window.Notification.requestPermission().catch(() => {});
+  async function onEnableNotificationsClick() {
+    if (typeof window.Notification === 'undefined') {
+      state.ui.notificationPermission = 'unsupported';
+      updateSetting('systemNotificationsEnabled', false);
+      setMessage('Notifications not supported', true);
+      renderNotificationPermissionState();
+      return;
+    }
+    try {
+      const permission = await window.Notification.requestPermission();
+      state.ui.notificationPermission = permission;
+      if (permission === 'granted') {
+        state.data.settings = sanitizeSettings({ ...state.data.settings, systemNotificationsEnabled: true });
+        debouncedSave();
+        setMessage('Notifications enabled.');
+      } else if (permission === 'denied') {
+        state.data.settings = sanitizeSettings({ ...state.data.settings, systemNotificationsEnabled: false });
+        debouncedSave();
+        setMessage('Notifications were denied. Enable them in browser site settings to use Windows toasts.', true);
+      } else {
+        setMessage('Notification permission was not granted.', true);
+      }
+      renderSettings();
+    } catch {
+      setMessage('Failed to request notification permission.', true);
+    }
   }
 
-  function showSessionCompleteNotification(completedMode) {
-    if (typeof window.Notification === 'undefined') return;
-    if (window.Notification.permission !== 'granted') return;
+  function onTestNotificationClick() {
+    const fakeSession = {
+      id: `test-${Date.now()}`,
+      sessionType: 'focus',
+      completed: true,
+      context: currentContextOrNull()
+    };
+    const shown = tryShowSystemNotification(fakeSession, 'focus');
+    if (!shown) {
+      showDoneBanner('Session finished.');
+      if (state.data.settings.flashTitleOnDone) startTitleFlash();
+      setMessage('System notification unavailable; fallback shown.', true);
+      return;
+    }
+    setMessage('Test notification sent.');
+  }
+
+  function renderNotificationPermissionState() {
+    const supported = typeof window.Notification !== 'undefined';
+    const permission = supported ? window.Notification.permission : 'unsupported';
+    state.ui.notificationPermission = permission;
+    const enabled = supported && permission === 'granted';
+    els['test-notification-btn'].disabled = !enabled;
+  }
+
+  function handleCompletedSessionNotification(session, completedMode) {
+    if (!session || !session.completed) return;
+    const id = session.id;
+    if (!id || id === state.notifications.lastNotifiedSessionId) return;
+    state.notifications.lastNotifiedSessionId = id;
+    const shown = tryShowSystemNotification(session, completedMode);
+    showDoneBanner('Session finished.');
+    if (state.data.settings.flashTitleOnDone) startTitleFlash();
+    if (!shown && state.data.settings.systemNotificationsEnabled && typeof window.Notification !== 'undefined' && window.Notification.permission === 'denied') {
+      setMessage('System notifications are blocked. Using in-app banner/title flash fallback.', true);
+    }
+  }
+
+  function tryShowSystemNotification(session, completedMode) {
+    if (!state.data.settings.systemNotificationsEnabled) return false;
+    if (typeof window.Notification === 'undefined') return false;
+    if (window.Notification.permission !== 'granted') return false;
 
     const next = nextMode(completedMode, completedMode === 'focus' ? state.timer.phaseCount + 1 : state.timer.phaseCount, state.data.settings.longBreakInterval);
-    const body = `Finished ${humanMode(completedMode)}. Up next: ${humanMode(next)}.`;
-    const notification = new window.Notification('Pomodoro complete', {
+    const contextLabelText = session.sessionType === 'focus' ? selectedTaskName(session) : '';
+    const body = session.sessionType === 'focus'
+      ? `Focus finished${contextLabelText ? `: ${contextLabelText}` : ''}. Next: ${humanMode(next)}.`
+      : `${humanMode(session.sessionType)} finished. Next: ${humanMode(next)}.`;
+    const title = session.sessionType === 'focus' ? '⏰ Focus finished' : '⏰ Session finished';
+    const notification = new window.Notification(title, {
       body,
-      tag: NOTIFICATION_TAG,
+      tag: 'localpomodoro-session-finished',
       renotify: true,
     });
 
     notification.onclick = () => {
       window.focus();
+      state.ui.activeTab = 'timer';
+      render();
       notification.close();
     };
+    return true;
+  }
+
+  function selectedTaskName(session) {
+    if (session.note) return session.note;
+    if (!session.context) return '';
+    const { goalId, projectId, topicId } = session.context;
+    const topic = state.data.hierarchy.topics.find((t) => t.id === topicId && !t.archived);
+    if (topic) return topic.name;
+    const project = state.data.hierarchy.projects.find((p) => p.id === projectId && !p.archived);
+    if (project) return project.name;
+    const goal = state.data.hierarchy.goals.find((g) => g.id === goalId && !g.archived);
+    return goal ? goal.name : '';
+  }
+
+  function showDoneBanner(text) {
+    els['session-done-text'].textContent = text;
+    els['session-done-banner'].hidden = false;
+  }
+
+  function dismissDoneBanner() {
+    els['session-done-banner'].hidden = true;
+    stopTitleFlash();
+  }
+
+  function startTitleFlash() {
+    stopTitleFlash();
+    state.notifications.flashOriginalTitle = state.notifications.flashOriginalTitle || document.title;
+    state.notifications.flashTimerId = setInterval(() => {
+      state.notifications.flashState = !state.notifications.flashState;
+      document.title = state.notifications.flashState ? DONE_TITLE : state.notifications.flashOriginalTitle;
+    }, 1000);
+    state.notifications.flashStopTimeoutId = setTimeout(stopTitleFlash, 30000);
+  }
+
+  function stopTitleFlash() {
+    if (state.notifications.flashTimerId) clearInterval(state.notifications.flashTimerId);
+    if (state.notifications.flashStopTimeoutId) clearTimeout(state.notifications.flashStopTimeoutId);
+    state.notifications.flashTimerId = null;
+    state.notifications.flashStopTimeoutId = null;
+    state.notifications.flashState = false;
+    document.title = state.notifications.flashOriginalTitle;
   }
 
 

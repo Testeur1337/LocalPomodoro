@@ -76,3 +76,5 @@ textarea { width: 100%; }
 .workspace-saved { color: var(--muted); }
 .status { margin: 0; min-height: 1.3rem; color: var(--muted); }
 .reflection-form label { display:flex; flex-direction:column; gap:.25rem; margin-top:.5rem; }
+
+.session-done-banner { display:flex; align-items:center; justify-content:space-between; gap:.6rem; border:1px solid var(--primary); background:rgba(74,103,255,.12); border-radius:.7rem; padding:.6rem .75rem; }
