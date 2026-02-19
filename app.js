@@ -8,6 +8,7 @@
   const WORKSPACE_HANDLE_DB = 'mypomodoro_workspace_db';
   const WORKSPACE_HANDLE_STORE = 'handles';
   const WORKSPACE_HANDLE_ID = 'last-workspace';
+  const NOTIFICATION_TAG = 'localpomodoro-session-complete';
   const APP_VERSION = 3;
 
   const DEFAULT_DATA = {
@@ -171,6 +172,7 @@
 
   function startTimer() {
     if (state.timer.running) return;
+    requestNotificationPermissionIfNeeded();
     if (!Number.isFinite(state.timer.remainingSeconds) || state.timer.remainingSeconds <= 0) initializeTimer();
     const now = Date.now();
     state.timer.running = true;
