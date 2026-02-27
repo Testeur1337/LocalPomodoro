@@ -153,10 +153,6 @@
     els['paste-btn'].addEventListener('click', pasteDataFromClipboard);
     els['reset-all-btn'].addEventListener('click', resetAllData);
     els['theme-toggle'].addEventListener('click', cycleTheme);
-    els['workspace-open-btn'].addEventListener('click', openWorkspaceFlow);
-    els['workspace-open-last-btn'].addEventListener('click', openLastWorkspace);
-    els['workspace-save-btn'].addEventListener('click', () => saveWorkspace(false));
-    els['workspace-save-as-btn'].addEventListener('click', () => saveWorkspace(true));
 
     els['reflection-form'].addEventListener('submit', onSaveReflection);
 
@@ -289,7 +285,6 @@
       return;
     }
     initializeTimer();
-    initializeWorkspaceManager();
     render();
   }
 
@@ -980,146 +975,6 @@
     return Number(m[1]) * 60 + Number(m[2]);
   }
 
-  async function initializeWorkspaceManager() {
-    const meta = loadWorkspaceMeta();
-    state.workspace.lastSavedAt = meta.lastSavedAt || null;
-    state.workspace.lastSavedFilename = meta.lastSavedFilename || null;
-    state.workspace.name = meta.workspaceName || 'Local only';
-    state.workspace.usingFileHandle = Boolean(meta.usingFileHandle);
-    if (hasFileSystemAccess()) {
-      const handle = await restoreWorkspaceHandle();
-      if (handle) { state.workspace.handle = handle; state.workspace.canOpenLastWorkspace = true; state.workspace.usingFileHandle = true; }
-    }
-    renderWorkspaceStatus();
-  }
-
-  function hasFileSystemAccess() { return typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function'; }
-
-  function loadWorkspaceMeta() { try { return JSON.parse(localStorage.getItem(WORKSPACE_META_KEY) || '{}'); } catch { return {}; } }
-  function saveWorkspaceMeta(meta) {
-    localStorage.setItem(WORKSPACE_META_KEY, JSON.stringify({ workspaceName: state.workspace.name, usingFileHandle: state.workspace.usingFileHandle, lastSavedAt: state.workspace.lastSavedAt, lastSavedFilename: state.workspace.lastSavedFilename, ...meta }));
-  }
-  function markDirty() { state.workspace.dirty = true; renderWorkspaceStatus(); }
-  function clearDirty() { state.workspace.dirty = false; state.workspace.lastSavedAt = new Date().toISOString(); saveWorkspaceMeta(); renderWorkspaceStatus(); }
-
-  function renderWorkspaceStatus() {
-    if (!els['workspace-name']) return;
-    els['workspace-name'].textContent = state.workspace.name || 'Local only';
-    els['workspace-dirty'].textContent = state.workspace.dirty ? 'Unsaved changes' : 'Saved';
-    els['workspace-dirty'].className = state.workspace.dirty ? 'workspace-dirty' : 'workspace-saved';
-    els['workspace-last-saved'].textContent = state.workspace.lastSavedAt || state.workspace.lastSavedFilename ? `Last saved: ${state.workspace.lastSavedAt ? new Date(state.workspace.lastSavedAt).toLocaleString() : '—'} (${state.workspace.lastSavedFilename || state.workspace.name})` : 'No workspace file saved yet.';
-    els['workspace-open-last-btn'].hidden = !state.workspace.canOpenLastWorkspace;
-  }
-
-  async function openWorkspaceFlow() {
-    try {
-      if (hasFileSystemAccess()) {
-        const [handle] = await window.showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }], multiple: false });
-        if (handle) await loadWorkspaceFromHandle(handle);
-      } else {
-        state.ui.pendingFilePurpose = 'workspace';
-        els['import-file-input'].click();
-      }
-    } catch (err) { if (err.name !== 'AbortError') setMessage(`Open workspace failed: ${err.message || err}`, true); }
-  }
-
-  async function openLastWorkspace() {
-    if (!state.workspace.handle) state.workspace.handle = await restoreWorkspaceHandle();
-    if (!state.workspace.handle) return setMessage('No previously authorized workspace found.', true);
-    await loadWorkspaceFromHandle(state.workspace.handle);
-  }
-
-  async function loadWorkspaceFromHandle(handle) {
-    const file = await handle.getFile();
-    state.data = validateImport(JSON.parse(await file.text()));
-    persistData(state.data);
-    initializeTimer();
-    state.workspace.handle = handle;
-    state.workspace.usingFileHandle = true;
-    state.workspace.name = file.name || 'Workspace JSON';
-    state.workspace.lastSavedFilename = state.workspace.name;
-    state.workspace.canOpenLastWorkspace = true;
-    await persistWorkspaceHandle(handle);
-    clearDirty();
-    render();
-    setMessage(`Workspace loaded: ${state.workspace.name}`);
-  }
-
-  async function saveWorkspace(forceSaveAs) {
-    try {
-      if (hasFileSystemAccess()) {
-        if (forceSaveAs || !state.workspace.handle) {
-          state.workspace.handle = await window.showSaveFilePicker({ suggestedName: suggestedWorkspaceFilename(), types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
-          state.workspace.usingFileHandle = true;
-          state.workspace.canOpenLastWorkspace = true;
-          await persistWorkspaceHandle(state.workspace.handle);
-        }
-        if (state.workspace.handle) {
-          const writable = await state.workspace.handle.createWritable();
-          await writable.write(JSON.stringify(state.data, null, 2));
-          await writable.close();
-          state.workspace.name = state.workspace.handle.name || state.workspace.name;
-          state.workspace.lastSavedFilename = state.workspace.name;
-          clearDirty();
-          setMessage(`Workspace saved: ${state.workspace.name}`);
-          return;
-        }
-      }
-      const filename = suggestedWorkspaceFilename();
-      downloadJson(filename);
-      state.workspace.name = 'Local only';
-      state.workspace.usingFileHandle = false;
-      state.workspace.lastSavedFilename = filename;
-      clearDirty();
-      setMessage(`Workspace downloaded: ${filename}`);
-    } catch (err) {
-      if (err.name !== 'AbortError') setMessage(`Save workspace failed: ${err.message || err}`, true);
-    }
-  }
-
-  function suggestedWorkspaceFilename() { return `localpomodoro_workspace_${new Date().toISOString().slice(0, 10)}.json`; }
-  function downloadJson(filename) {
-    const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  }
-  async function persistWorkspaceHandle(handle) {
-    saveWorkspaceMeta();
-    try { const db = await openWorkspaceDb(); await dbPut(db, WORKSPACE_HANDLE_ID, handle); } catch {}
-  }
-  async function restoreWorkspaceHandle() {
-    try { const db = await openWorkspaceDb(); return await dbGet(db, WORKSPACE_HANDLE_ID); } catch { return null; }
-  }
-  function openWorkspaceDb() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(WORKSPACE_HANDLE_DB, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore(WORKSPACE_HANDLE_STORE);
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => resolve(req.result);
-    });
-  }
-  function dbPut(db, key, value) {
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(WORKSPACE_HANDLE_STORE, 'readwrite');
-      tx.objectStore(WORKSPACE_HANDLE_STORE).put(value, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-  function dbGet(db, key) {
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(WORKSPACE_HANDLE_STORE, 'readonly');
-      const req = tx.objectStore(WORKSPACE_HANDLE_STORE).get(key);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function onBeforeUnload(e) {
-    if (state.workspace.dirty && state.data.settings.warnOnUnsavedChanges !== false) { e.preventDefault(); e.returnValue = ''; }
-  }
-
   async function onEnableNotificationsClick() {
     if (typeof window.Notification === 'undefined') {
       state.ui.notificationPermission = 'unsupported';
@@ -1470,7 +1325,7 @@
   }
 
   function onBeforeUnload(e) {
-    if (state.workspace.dirty && state.data.settings.warnOnUnsavedExit !== false) {
+    if (state.workspace.dirty && state.data.settings.warnOnUnsavedChanges !== false) {
       e.preventDefault();
       e.returnValue = '';
     }
